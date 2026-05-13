@@ -1,0 +1,42 @@
+{
+  "manifest_version": 3,
+  "name": "Tulbelt",
+  "version": "0.1.0",
+  "description": "Quality-of-life toggles for tulip.co.",
+  "permissions": [
+    "declarativeNetRequestWithHostAccess",
+    "storage",
+    "webNavigation",
+    "tabs"
+  ],
+  "host_permissions": [
+    "*://*.tulip.co/*"
+  ],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": ["*://*.tulip.co/*"],
+      "js": ["content.js", "auto-snapshot.js", "hide-legacy.js", "disable-tooltips.js", "hide-view-only-triggers.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Tulbelt",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  }
+}
