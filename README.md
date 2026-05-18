@@ -8,6 +8,13 @@ each one a self-contained tweak to the Tulip web UI.
 > endorsed by, or supported by Tulip Interfaces. "Tulip" is used only to
 > describe what the extension works with.
 
+> **No guarantees.** Every toggle works by tweaking Tulip's web UI, which Tulip
+> can change at any time without notice. There is no guarantee a toggle will
+> keep working in future Tulip releases, or that it works on every Tulip
+> version or instance — a toggle may stop having any effect, or behave
+> unexpectedly, after a Tulip update. Use at your own risk; if a toggle
+> misbehaves, switch it off (every toggle reverts cleanly when disabled).
+
 ## What it does
 
 Open the toolbar popup to see every available toggle with a description. A few
@@ -20,7 +27,9 @@ examples of what's in there:
 - **Fuzzy expression autocomplete** — substring matching in the formula editor.
 
 The full, authoritative list lives in [`features.js`](./features.js) and is
-rendered automatically in the popup — no list here to drift out of date.
+rendered automatically in the popup — no list here to drift out of date. For a
+per-toggle reference with defaults and notes, see
+[docs/toggles.md](./docs/toggles.md).
 
 ## Install (from source)
 
@@ -47,6 +56,20 @@ every toggle is designed to cleanly revert when switched back off.
 - `toggles/<feature>.js` — one content script per DOM/behavior tweak. Each reads
   its on/off state from `chrome.storage.local` and applies or reverts itself.
 - `docs/` — design notes for the more involved features.
+
+## Reporting issues
+
+Bug reports and toggle ideas go through
+[GitHub Issues](https://github.com/dapomeranz/tulbelt/issues/new/choose) — pick
+**Bug report** or **Feature request**.
+
+Because every toggle works by tweaking Tulip's web UI, a tweak that works on one
+Tulip version can break on another (see the "No guarantees" note above). The
+bug report form **requires the Tulip version** your instance is running, along
+with your browser and Tulbelt version — without the Tulip version a report
+usually can't be acted on, since most breakage is version-specific. Before
+filing, it's worth toggling the feature off to confirm the page fully restores;
+the form asks for that too.
 
 ## Contributing
 
