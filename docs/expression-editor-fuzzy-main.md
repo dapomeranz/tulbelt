@@ -1,191 +1,299 @@
 # Expression editor fuzzy search (`expression-editor-fuzzy-main.js`)
 
+
+
 This document explains how the main-world half of Tulbelt’s expression-editor fuzzy search works. The implementation lives in `toggles/expression-editor-fuzzy-main.js`; the isolated-world toggle bridge is in `toggles/expression-editor-fuzzy.js`.
+
+
 
 ## Purpose
 
-Tulip’s expression autocomplete is React-driven and **context-filtered** (fields vs functions/operators depend on what you’ve typed). This feature replaces the visible suggestion list with a custom overlay that searches the **full** suggestion catalog (~31k items) while still inserting choices through Tulip’s native `onSelection` handler.
+
+
+Tulip’s expression autocomplete is React-driven and **context-filtered** (fields vs functions/operators depend on what you’ve typed). This feature replaces the visible suggestion list with a custom overlay that searches the **full** suggestion catalog (size varies by Tulip instance — fields, apps, and functions in the workspace) while still inserting choices through Tulip’s native selection path.
+
+
 
 ## Two-world architecture
 
-Chrome extension content scripts normally run in an **isolated world** where React fiber expandos (`__reactFiber$…`) on DOM nodes are often invisible. This feature is split:
+
 
 | Piece | World | Role |
+
 |-------|--------|------|
+
 | `expression-editor-fuzzy.js` | Isolated | Reads `chrome.storage`, sets `<html data-tulbelt-fuzzy-enabled="true\|false">` |
+
 | `expression-editor-fuzzy-main.js` | **MAIN** (see `manifest.json`) | Watches that attribute; all DOM/React work happens here |
+
+
 
 The main-world script cannot use `chrome.*` APIs. Enable/disable is signaled only via the `data-tulbelt-fuzzy-enabled` attribute on `<html>`.
 
+
+
 ## High-level flow
 
+
+
 ```
+
 html[data-tulbelt-fuzzy-enabled="true"]
+
   → MutationObserver on document
+
   → Detect popper + ReactVirtualized list + expression editor
+
   → attachToPopper
+
   → Read master list from React fiber
+
   → Hide native list, show custom overlay
+
   → On editor mutations: render (filter + draw rows)
-  → Click / Enter → selectItem → Tulip's onSelection
+
+  → Click / Enter → selectItem → invokeNativeListRowSelect (or onSelection fallback)
+
 ```
+
+
 
 ## Activation lifecycle
 
+
+
 | Event | Action |
+
 |-------|--------|
+
 | `data-tulbelt-fuzzy-enabled="true"` | Inject styles, install capture-phase key handler, start document observer, scan and attach poppers |
+
 | Popper appears (list + editor) | `attachToPopper` → overlay + editor `MutationObserver` |
+
 | User types | `render` → re-read live arrays, filter, redraw overlay |
-| User picks row / Enter | `selectItem` → synthetic backspaces + `onSelection` |
+
+| User picks row / Enter | `selectItem` → native row handler, or `onSelection` for fuzzy-only picks |
+
 | Feature off | Detach all, remove styles; stop observer unless observe mode is on |
 
-On load, `applyEnabled(readEnabledAttr())` runs immediately; an attribute observer keeps state in sync when the isolated script toggles the feature.
+
 
 ## Finding and attaching to the popup
 
+
+
 When enabled:
 
+
+
 1. **`ensureStyles`** — CSS for overlay rows and hiding the native React list.
-2. **`installGlobalKeyHandler`** — capture-phase `window` keydown (runs before Tulip’s editor handlers).
+
+2. **`installGlobalKeyHandler`** — capture-phase `window` keydown (runs before Tulip’s editor handlers). Arrow keys / Enter navigate the overlay; **Ctrl+Enter** (Cmd+Enter on Mac) clicks `[data-testid="expression-editor-save-button"]`. The Save button gets an `aria-label` / `title` hint when a popper attaches.
+
 3. **`startObserver`** — `MutationObserver` on `document.documentElement` for new poppers/lists.
+
 4. **`requestScan` → `scanAll`** — coalesced per animation frame; finds `.ReactVirtualized__List` inside `[data-testid="popper"]` that also contains `[data-testid="expression-editor-input"]`.
+
+
 
 ### `attachToPopper`
 
-Core hook-up for each expression-editor popper:
 
-- **`fiberOfNearestHost(list)`** — walks up to 6 ancestors to find a React fiber (the list element is not always the fiber host).
-- **`findLists(fiber)`** — walks the fiber tree (up + shallow down) and collects every “options-shaped” array from `memoizedProps` and hook state.
-- **`master`** — largest options array (full ~31k catalog).
-- **`indexed`** — preferred: array whose items have `.indexes`; fallback: smallest non-master array (Tulip’s context-filtered list).
-- **`findSelectHandler`** — walks up fibers for `onSelection` (and fallbacks: `onSelect`, `onSelectItem`, etc.).
-- **`buildOverlay`** — hides the real list (`data-tulbelt-fuzzy-hide-react-list="true"`) and appends a plain DOM overlay in the same wrapper.
 
-Per-popper state is stored in `popperState` (`WeakMap`). Editor changes trigger `render` via a `MutationObserver` on the editor.
+- **`fiberOfNearestHost(list)`** — walks up to 6 ancestors to find a React fiber.
 
-## React introspection
+- **`findLists(fiber)`** — collects options-shaped arrays from fiber props/hooks.
 
-### Fiber access
+- **`master`** — largest options array (Tulip’s full suggestion catalog for this instance; not a fixed size).
 
-`fiberOf(node)` uses `Object.getOwnPropertyNames` (not `Object.keys`) to find expandos matching:
+- **`master` only** — the overlay filters the largest options array (`props.suggestions` in practice). Smaller props like `contextNames` are not suggestion lists.
 
-- `__reactFiber$`
-- `__reactInternalInstance$`
-- `__reactContainer$`
+- **`findSelectHandler`** — locates `onSelection` (sanity gate at attach; stored as `state.onSelect` for fuzzy-only fallback).
 
-### `findLists` / `readArrayFrom`
+- **`buildOverlay`** — hides the real list and appends the custom overlay.
 
-`findLists` scans props and hook chains for arrays whose items look like suggestions (strings or objects with `label`, `displayName`, `path`, etc.). It returns stable `{ fiber, key }` sources.
 
-`readArrayFrom(source)` re-fetches the live array on every render — Tulip replaces array references on each keystroke (immutable updates).
 
-### `pickLiveItem`
+Per-popper state is stored in `popperState` (`WeakMap`).
 
-When selecting, maps a master-catalog item to the matching entry in the smaller **indexed** list (by `value` or label) so Tulip receives correct metadata when possible.
+
 
 ## Filtering (“fuzzy”)
 
-Despite the name, filtering is **case-insensitive substring** search on labels, capped at **200** results (`MAX_RESULTS`). Master-list order is preserved.
 
-### Rules
 
-- **Bypasses Tulip’s context gating** — e.g. type `floor` to reach `Floor()` from anywhere; type `user.id` without `@` to reach field paths.
-- Leading `@` on the **query** restricts results to labels starting with `@`.
-- Leading `@` on field labels is stripped from the haystack so `user.id` matches `@Table … User.ID`.
-- **`HIDDEN_LABEL_PREFIXES`** drops noisy categories (`@Users`, `@User Groups`, `@Machine Activity Field`, `@Last Machine Output`).
+Case-insensitive substring search on labels, capped at **200** results (`MAX_RESULTS`). Master-list order is preserved.
 
-The **query** string comes from `getCurrentRange` (see below).
 
-## Caret and token range
 
-Tulip’s editor is not a normal contenteditable. It mirrors text in:
+- Bypasses Tulip’s context gating (e.g. `floor` → `Floor()` from anywhere).
 
-- `.content` — spans with `data-index`
-- `.cursorContainer` — `.cursor` spans for caret position
+- Leading `@` on the query restricts to field labels.
 
-### `getCurrentRange`
+- **`HIDDEN_LABEL_PREFIXES`** drops noisy categories.
 
-1. **`caretOffsetIn`** — finds visible `.cursor`, maps to `data-index` span for offset; falls back to `TreeWalker` over text nodes.
-2. Walk **backward** from caret to previous **hard separator**: `[+\-*/(),;"'=!<>%&|^~]` — whitespace and `.` are **not** separators (field names contain spaces and dots).
-3. Skip leading whitespace inside the token.
-4. Clamp start to the active span (field chip) via `spanAtCaret`.
-5. Walk **forward** to token end (same separator rules), clamped to span.
 
-Returns `{ text, query, start, end }` used for filtering and splice range on select.
 
-## Rendering the overlay
+The filter **query** comes from `getCurrentRange`. The same token span drives fuzzy-only `onSelection` indexes.
 
-`render(state)`:
 
-1. Re-reads live master/indexed arrays via `readArrayFrom`.
-2. Computes `currentRange` and `filtered = fuzzyFilter(masterList, query)`.
-3. Rebuilds overlay rows; maintains `selectedIndex` for keyboard highlight.
-4. Shows empty state when no matches.
+
+## Caret and token range (`getCurrentRange`)
+
+
+
+Tulip’s editor mirrors text in `.content` (spans with `data-index`) and `.cursorContainer` (`.cursor` spans).
+
+
+
+1. **`caretOffsetIn`** — maps visible cursor to offset.
+
+2. Walk backward/forward to hard separators `[+\-*/(),;"'=!<>%&|^~]` (whitespace and `.` are not separators).
+
+3. Clamp to active field span via `spanAtCaret`.
+
+4. **Trailing edge of a committed field chip** — if the caret sits on the chip’s end boundary (not inside it), return an empty query and zero-width span so a second **Enter** (e.g. after finishing an `OBJECT({…})` value) is left to Tulip instead of re-selecting the chip and splicing the formula.
+
+
 
 ## Selecting an item (`selectItem`)
 
-Tulip’s `onSelection` recomputes splice range from the caret using **whitespace** tokenization. This extension uses **operator** tokenization. The bridge:
 
-1. **`resolveSelectionRange`** — prefers `pendingSelectionRange` (from mousedown), else last render’s `currentRange`, else fresh read.
-2. **`moveCaretToOffset`** — synthetic `ArrowRight` keydowns to reach `range.end` (never ArrowLeft — would jump into prior chips).
-3. Compute **`extra`** — chars between our token start and Tulip’s whitespace-based start; issue that many synthetic **Backspace** keydowns via `sendBackspaces`.
-4. Re-resolve fresh **`onSelection`** from current fiber (handler closures go stale after deletes).
-5. **`pickLiveItem`** — prefer live indexed item when resolvable.
-6. Call **`onSelect(payload)`** with `indexes: { start, end - extra }` merged onto the item.
+
+**Do not compute splice indexes by walking `controller.value`.** Tulip serializes field chips as `\u001f`-delimited blobs; token-walking lands inside the first chip.
+
+
+
+1. **Focus the editor.**
+
+2. **`invokeNativeListRowSelect`** / **`invokeNativeRowSelectFromFiber`** — call the matching row’s React `onClick` / `onMouseDown` when that row is mounted in the hidden list (DOM match first, then fiber walk).
+
+3. **Fuzzy-only fallback** — **`state.onSelect`** with indexes from frozen token range (`pendingSelection` on overlay click, else fresh `getCurrentRange()` on Enter) when the token is **after** all `.field` chips. Do **not** splice when the token is **inside** a committed field chip. Do **not** focus the editor on overlay mousedown.
+
+
 
 ## Keyboard navigation
 
-Single **capture-phase** listener on `window` for `ArrowUp`, `ArrowDown`, and `Enter` when the event target is inside the attached editor. Uses `preventDefault` + `stopImmediatePropagation` so Tulip does not navigate its hidden native list.
 
-Registration order matters: per-editor listeners would run after Tulip’s; capture on `window` fires first regardless of order.
 
-## Observe mode (debugging)
+Capture-phase `window` listener for `ArrowUp`, `ArrowDown`, and `Enter` when the target is inside the attached editor. **Enter** is not intercepted when `getCurrentRange().query` is empty (caret after a committed chip with nothing left to filter).
 
-Independent of the feature toggle. Enable from the page console:
+
+
+## Debugging (agents)
+
+
+
+All helpers live on `window.__tulbeltFuzzy` in the **page** console (main world), not the extension popup console.
+
+
+
+### A/B comparison (same commands)
+
+
 
 ```js
-__tulbeltFuzzy.observe(true)   // start session-only logging
-__tulbeltFuzzy.observe(false)  // stop
-__tulbeltFuzzy.observe()       // toggle
+// 1) Native Tulip — turn fuzzy OFF in Tulbelt, open expression editor
+__tulbeltFuzzy.capture()       // or capture('baseline')
+// … type + pick from Tulip’s native list (not the overlay) …
+__tulbeltFuzzy.copyLog()       // saves lastBaselineExport / lastBaselineJson
+
+// 2) Enhanced — turn fuzzy ON, same editor scenario
+__tulbeltFuzzy.clearLog()
+__tulbeltFuzzy.capture()       // or capture('enhanced')
+// … same steps using the overlay / Enter …
+__tulbeltFuzzy.copyLog()       // saves lastEnhancedExport / lastEnhancedJson
+
+// 3) Both runs in one paste (after two copyLog() calls)
+__tulbeltFuzzy.copyComparison()
+
+__tulbeltFuzzy.capture(false)  // stop recording
 ```
 
-Does **not** change the UI (no overlay, no list hide). Logs editor text, query range, master/indexed arrays, and visible DOM rows on each edit; logs before/after editor text on native row clicks. Useful for reverse-engineering Tulip with the override off.
 
-## Debug API (`window.__tulbeltFuzzy`)
+
+`capture()` with no argument picks the phase from the fuzzy toggle: **off → baseline**, **on → enhanced**. Force a phase with `capture('baseline')` or `capture('enhanced')`. Call `capture()` again (or `capture(false)`) to stop.
+
+
+
+Exported JSON includes `phase: "baseline" | "enhanced"`. During capture, log lines use shared tags:
+
+| Tag | When |
+|-----|------|
+| `capture:edit` / `capture:attach` | Each coalesced editor mutation (baseline + enhanced while observing) |
+| `capture:keydown` / `capture:keydown→after` | Enter, Tab, or arrows in the editor (native list picks without click) |
+| `capture:click` / `capture:click→after` | Native virtualized row click |
+| `capture:onSelection` | Wrapped `onSelection` handler |
+| `capture:render` | Enhanced overlay redraw (filtered count + pending indexes) |
+| `capture:pick→after:…` | Enhanced pick (`native`, `type-field`, `onSelection`) |
+
+Each `capture:edit` entry includes the same fields the plugin uses: `range.caret`, `pending` (token span + controller cursor), `controller` (DOM range, content spans, selection), and `listDom` (`nativeRowCount`, etc.). `indexPreview` is logged on enhanced picks / `capture:render` only (misleading on multi-chip edits).
+
+
 
 | Method | Purpose |
+
 |--------|---------|
-| `setEnabled(bool)` | Session-only toggle (storage/popup can override on next sync) |
-| `observe(bool?)` | Toggle passive shadow logger |
-| `traceSelect(bool?)` | Verbose selection logging |
-| `snapshot()` | One-shot state dump to console |
-| `scan()` | Force `scanAll` |
-| `findLists(node?)` | Dump master/indexed/all arrays from fiber |
-| `dumpArrays(node?)` | Summarized array hunt |
-| `range()` | Current token range for active editor |
-| `state()` | Live attached popper state |
-| `visible()` | Items read from currently rendered virtualized rows |
-| `dump(node?)` | Fiber chain summary |
-| `findSelect(node?)` | Locate selection handler |
 
-## Key constants and selectors
+| `capture(phase?)` | Start/stop session recording (`false` / toggle off; `'baseline'` / `'enhanced'` / auto) |
 
-| Symbol | Value / meaning |
-|--------|----------------|
+| `exportLog()` / `copyLog()` | Full session (`entries` + `state` + `phase`). Use `copy(__tulbeltFuzzy.lastExportJson)` — do not `JSON.stringify(lastExport)`. |
+
+| `exportComparison()` / `copyComparison()` | `{ baseline, enhanced }` from the last two `copyLog()` runs |
+
+| `lastBaselineJson` / `lastEnhancedJson` | Last export per phase |
+
+| `clearLog()` | Clear session buffer (between runs) |
+
+| `report()` / `snapshot()` | Current state only (no history) |
+
+| `captureActive()` / `capturePhase()` | Is capture running? which phase? |
+
+| `debug(level?)` | Manual log level (`off` \| `select` \| `observe` \| `all`) — rarely needed during `capture()` |
+
+| `range()`, `selection()`, `state()`, `listDom()`, `findLists()`, `dumpArrays()`, `dump()`, `findSelect()` | Inspection |
+
+| `observe(bool?)` | Passive shadow logger without capture tagging |
+
+| `baseline()` / `enhanced()` | Deprecated aliases for `capture('baseline')` / `capture('enhanced')` |
+
+
+
+## Key constants
+
+
+
+| Symbol | Value |
+
+|--------|--------|
+
 | `POPPER_SEL` | `[data-testid="popper"]` |
+
 | `EDITOR_SEL` | `[data-testid="expression-editor-input"]` |
+| `SAVE_BTN_SEL` | `[data-testid="expression-editor-save-button"]` |
+
 | `LIST_SEL` | `.ReactVirtualized__List` |
-| `ATTR` | `data-tulbelt-fuzzy-enabled` |
+
 | `MAX_RESULTS` | 200 |
+
+
 
 ## Related files
 
+
+
 - `toggles/expression-editor-fuzzy-main.js` — main-world implementation
+
 - `toggles/expression-editor-fuzzy.js` — isolated-world storage → attribute bridge
+
 - `manifest.json` — `world: "MAIN"` content script entry
-- `features.js` — feature id `expression-editor-fuzzy` for popup toggles
+
+
 
 ## One-line summary
 
-Reads Tulip’s full suggestion list from React fibers in the main world, filters it client-side by the token under the caret, replaces the native virtualized list with a DOM overlay, and inserts selections through Tulip’s `onSelection` — with synthetic backspaces to align Tulip’s whitespace-based tokenizer with the extension’s operator-based tokenizer.
+
+
+Replaces Tulip’s virtualized suggestion list with a fuzzy-filtered overlay over the full catalog, and inserts picks by calling each native list row’s React click handler (or `onSelection` when the row isn’t in Tulip’s DOM).
+
+

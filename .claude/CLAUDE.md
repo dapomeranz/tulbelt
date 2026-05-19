@@ -13,3 +13,6 @@ Match existing style. Don't refactor what isn't broken.
 ## Rule 4 — Goal-Driven Execution
 Define success criteria. Loop until verified.
 Strong success criteria let Claude loop independently.
+
+## Rule 5 - Use logs to gain context clarity
+If the user is trying to resolve something potentially messy, help to gain more context by writing scripts for them to easily acquire clean context from the browser window they are testing in.

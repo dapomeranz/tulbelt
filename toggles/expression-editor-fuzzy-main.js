@@ -12,12 +12,13 @@
 const ATTR = 'data-tulbelt-fuzzy-enabled';
 const STYLE_ID = 'tulbelt-fuzzy-styles';
 const HIDE_REACT_LIST_ATTR = 'data-tulbelt-fuzzy-hide-react-list';
+const LIST_HOST_ATTR = 'data-tulbelt-fuzzy-list-host';
 const OVERLAY_CLASS = 'tulbelt-fuzzy-overlay';
 const ROW_CLASS = 'tulbelt-fuzzy-row';
+const FN_ROW_CLASS = 'tulbelt-fuzzy-row--fn';
 const SELECTED_CLASS = 'tulbelt-fuzzy-row--selected';
 const EMPTY_CLASS = 'tulbelt-fuzzy-empty';
 const MAX_RESULTS = 200;
-let traceSelect = false;
 
 // Hard-filter: any item whose label starts with one of these prefixes
 // (case-insensitive) is hidden from the overlay entirely. These are
@@ -29,18 +30,294 @@ const HIDDEN_LABEL_PREFIXES = [
   '@User Groups',
   '@Machine Activity Field',
   '@Last Machine Output',
+  '@Current step input validity',
 ].map((s) => s.toLowerCase());
 
-const DEBUG = false;
+// Unified logging: off < select < observe < all
+const LOG = { off: 0, select: 1, observe: 2, all: 3 };
+const LOG_NAME = ['off', 'select', 'observe', 'all'];
+let logLevel = LOG.off;
+
+// Session log — one object for copy/paste (__tulbeltFuzzy.exportLog()).
+const sessionLog = [];
+let sessionStartedAt = Date.now();
+let sessionRecording = false;
+/** @type {'baseline'|'enhanced'|null} active __tulbeltFuzzy.capture() phase */
+let capturePhase = null;
+const SESSION_LOG_MAX = 500;
+const SANITIZE_MAX_DEPTH = 12;
+const SANITIZE_MAX_KEYS = 40;
+const SANITIZE_MAX_ARRAY = 50;
+const SANITIZE_MAX_STRING = 2000;
+
+function logLevelName() {
+  return LOG_NAME[logLevel] ?? 'off';
+}
+
+function objectTag(value) {
+  try {
+    return Object.prototype.toString.call(value);
+  } catch (_) {
+    return '';
+  }
+}
+
+function domDescriptor(el) {
+  try {
+    const cls =
+      typeof el.className === 'string'
+        ? el.className
+        : el.className?.baseVal;
+    return {
+      __node: objectTag(el) || 'Element',
+      tag: el.tagName || el.nodeName,
+      id: el.id || undefined,
+      class: cls ? String(cls).slice(0, 120) : undefined,
+    };
+  } catch (_) {
+    return { __node: 'Element' };
+  }
+}
+
+/** Reliable across realms — `instanceof Element` often fails on page nodes. */
+function isDomLike(value) {
+  if (!value || typeof value !== 'object') return false;
+  const tag = objectTag(value);
+  if (tag === '[object Window]' || tag === '[object Document]' || tag === '[object DocumentFragment]') {
+    return true;
+  }
+  if (/^\[object (HTML|SVG)/.test(tag)) return true;
+  try {
+    if (typeof Element !== 'undefined' && value instanceof Element) return true;
+    if (typeof Node !== 'undefined' && value instanceof Node) return true;
+  } catch (_) {}
+  try {
+    const nt = value.nodeType;
+    if (typeof nt === 'number' && nt >= 1 && nt <= 12 && value.nodeName) return true;
+  } catch (_) {}
+  return false;
+}
+
+/** Minified React fiber (`Ic`) — never walk memoizedProps/stateNode. */
+function isReactFiberLike(value) {
+  if (!value || typeof value !== 'object' || isDomLike(value)) return false;
+  try {
+    if (typeof value.tag === 'number' && ('child' in value || 'stateNode' in value)) {
+      return true;
+    }
+    const cn = value.constructor?.name;
+    if (cn === 'FiberNode' || cn === 'Ic') return true;
+  } catch (_) {}
+  return false;
+}
+
+/** Plain JSON-safe clone — DOM/React fibers become short descriptors. */
+function sanitizeForExport(value, seen, depth) {
+  if (value === undefined) return undefined;
+  if (value === null) return null;
+  const t = typeof value;
+  if (t === 'string') {
+    return value.length > SANITIZE_MAX_STRING
+      ? value.slice(0, SANITIZE_MAX_STRING) + '…'
+      : value;
+  }
+  if (t === 'number' || t === 'boolean' || t === 'bigint') return value;
+  if (t === 'symbol') return String(value);
+  if (t === 'function') {
+    const n = value.name;
+    return n ? `[Function:${n}]` : '[Function]';
+  }
+  const d = depth ?? 0;
+  if (d >= SANITIZE_MAX_DEPTH) return '[MaxDepth]';
+
+  if (isDomLike(value)) return domDescriptor(value);
+  if (isReactFiberLike(value)) return { __reactFiber: true };
+  if (value instanceof Error) {
+    return { __error: value.message, name: value.name };
+  }
+
+  if (t !== 'object') return String(value);
+
+  const tag = objectTag(value);
+  if (tag !== '[object Object]' && tag !== '[object Array]') {
+    return { __host: tag };
+  }
+
+  const weak = seen ?? new WeakSet();
+  if (weak.has(value)) return '[Circular]';
+  weak.add(value);
+
+  if (Array.isArray(value)) {
+    const out = value
+      .slice(0, SANITIZE_MAX_ARRAY)
+      .map((v) => sanitizeForExport(v, weak, d + 1));
+    if (value.length > SANITIZE_MAX_ARRAY) {
+      out.push(`…+${value.length - SANITIZE_MAX_ARRAY} more`);
+    }
+    return out;
+  }
+
+  const out = {};
+  const keys = Object.keys(value);
+  for (let i = 0; i < keys.length && i < SANITIZE_MAX_KEYS; i++) {
+    const k = keys[i];
+    if (k.startsWith('__react')) continue;
+    try {
+      out[k] = sanitizeForExport(value[k], weak, d + 1);
+    } catch (_) {
+      out[k] = '[Unserializable]';
+    }
+  }
+  if (keys.length > SANITIZE_MAX_KEYS) {
+    out['…'] = `+${keys.length - SANITIZE_MAX_KEYS} keys`;
+  }
+  return out;
+}
+
+/** Deep-clone to plain data, then stringify — never pass host objects to JSON.stringify. */
+function safeJsonStringify(obj) {
+  return JSON.stringify(sanitizeForExport(obj), null, 2);
+}
+
+function syncSessionRecording() {
+  sessionRecording = logLevel >= LOG.select || observing;
+}
+
+function recordSessionLog(level, args) {
+  if (!sessionRecording) return;
+  const entry = sanitizeForExport({
+    t: Date.now() - sessionStartedAt,
+    level: LOG_NAME[level] ?? 'unknown',
+  });
+  if (args.length === 0) {
+    entry.msg = '';
+  } else if (args.length === 1) {
+    if (typeof args[0] === 'string') entry.msg = args[0];
+    else entry.data = sanitizeForExport(args[0]);
+  } else if (typeof args[0] === 'string') {
+    entry.msg = args[0];
+    entry.data =
+      args.length === 2
+        ? sanitizeForExport(args[1])
+        : sanitizeForExport(args.slice(1));
+  } else {
+    entry.data = sanitizeForExport(args);
+  }
+  sessionLog.push(entry);
+  if (sessionLog.length > SESSION_LOG_MAX) sessionLog.shift();
+}
+
+function buildExportPayload() {
+  return {
+    exportedAt: new Date().toISOString(),
+    phase: capturePhase,
+    sessionMs: Date.now() - sessionStartedAt,
+    debug: logLevelName(),
+    enabled,
+    observing,
+    recording: sessionRecording,
+    entryCount: sessionLog.length,
+    entries: sessionLog.map((e) => sanitizeForExport(e)),
+    state: buildReport(),
+  };
+}
+
+function storeExportArchive(payload, text) {
+  if (payload?.phase === 'baseline') {
+    debugApi.lastBaselineExport = payload;
+    debugApi.lastBaselineJson = text;
+  } else if (payload?.phase === 'enhanced') {
+    debugApi.lastEnhancedExport = payload;
+    debugApi.lastEnhancedJson = text;
+  }
+}
+
+function exportLog() {
+  return sanitizeForExport(buildExportPayload());
+}
+
+function clearSessionLog() {
+  sessionLog.length = 0;
+  sessionStartedAt = Date.now();
+}
+
+function copyLog() {
+  const payload = exportLog();
+  let text;
+  try {
+    text = safeJsonStringify(payload);
+  } catch (e) {
+    text = JSON.stringify({
+      error: 'copyLog failed',
+      message: String(e?.message || e),
+      entryCount: sessionLog.length,
+    });
+    debugApi.lastExport = { error: String(e?.message || e), entryCount: sessionLog.length };
+    debugApi.lastExportJson = text;
+    console.log('[tulbelt:fuzzy:main] copyLog failed:', e?.message || e);
+    return debugApi.lastExport;
+  }
+  debugApi.lastExport = payload;
+  debugApi.lastExportJson = text;
+  storeExportArchive(payload, text);
+  const copiedMsg =
+    '[tulbelt:fuzzy:main] copied session log (' +
+    (payload.phase || 'session') +
+    ', ' +
+    (payload.entryCount ?? sessionLog.length) +
+    ' entries). Use lastExportJson';
+  if (typeof copy === 'function') {
+    try {
+      copy(text);
+      console.log(copiedMsg);
+      return payload;
+    } catch (_) {}
+  }
+  if (navigator.clipboard?.writeText) {
+    return navigator.clipboard.writeText(text).then(() => {
+      console.log(copiedMsg);
+      return payload;
+    });
+  }
+  console.log(
+    '[tulbelt:fuzzy:main] copy(__tulbeltFuzzy.lastExportJson) — do not JSON.stringify(lastExport)',
+  );
+  return payload;
+}
+
+function setLogLevel(next) {
+  if (next === undefined) {
+    logLevel = logLevel >= LOG.all ? LOG.off : logLevel + 1;
+  } else if (typeof next === 'boolean') {
+    logLevel = next ? LOG.all : LOG.off;
+  } else if (typeof next === 'number' && next >= 0 && next <= LOG.all) {
+    logLevel = next;
+  } else if (typeof next === 'string') {
+    const key = next.toLowerCase();
+    if (key in LOG) logLevel = LOG[key];
+    else if (key === 'on' || key === 'true') logLevel = LOG.all;
+    else if (key === 'false') logLevel = LOG.off;
+  }
+  syncSessionRecording();
+  return logLevelName();
+}
+
+function logAt(minLevel, ...args) {
+  recordSessionLog(minLevel, args);
+  if (logLevel < minLevel) return;
+  try { console.log('[tulbelt:fuzzy:main]', ...args); } catch (_) {}
+}
 
 function log(...args) {
-  if (!DEBUG && !traceSelect && !observing) return;
-  try { console.log('[tulbelt:fuzzy:main]', ...args); } catch (_) {}
+  logAt(LOG.all, ...args);
 }
 
 const POPPER_SEL = '[data-testid="popper"]';
 const EDITOR_SEL = '[data-testid="expression-editor-input"]';
+const SAVE_BTN_SEL = '[data-testid="expression-editor-save-button"]';
+const SAVE_HINT_ATTR = 'data-tulbelt-save-shortcut-hint';
 const LIST_SEL = '.ReactVirtualized__List';
+const NATIVE_ROW_SEL = '.ReactVirtualized__Grid__innerScrollContainer > div';
 
 let enabled = false;
 let docObserver = null;
@@ -129,34 +406,17 @@ function arrayLooksLikeOptions(arr) {
   return false;
 }
 
-function arrayHasIndexes(arr) {
-  if (!Array.isArray(arr) || arr.length === 0) return false;
-  const first = arr[0];
-  return (
-    !!first &&
-    typeof first === 'object' &&
-    !!first.indexes &&
-    typeof first.indexes === 'object' &&
-    typeof first.indexes.start === 'number' &&
-    typeof first.indexes.end === 'number'
-  );
-}
-
 // Walk the fiber chain (up + a few levels down at each ancestor) and
 // collect every options-shaped array we can see. We surface:
 //
-//   * master — LARGEST options array. Tulip's full ~31k catalog.
-//   * indexed — preferred: array whose items have `.indexes` already
-//     attached. (Empirically Tulip does NOT pre-inject indexes, so this is
-//     usually null. Kept for forward-compat.) Fallback: the smallest
-//     non-master options array, which is our best heuristic for Tulip's
-//     currently-visible, context-filtered list.
+//   * master — LARGEST options array. Tulip's full suggestion catalog for
+//     this instance (size varies with workspace fields, apps, functions).
 //   * all — every option-array we found, with fiber + source key, so the
 //     debug API can dump them for inspection.
 //
-// Both master + indexed are returned with their `{fiber, key}` so callers
-// can cheaply re-read the live value each render (Tulip's immutable
-// updates change the array reference at every keystroke).
+// Master is returned with `{fiber, key}` so callers can cheaply re-read the
+// live value each render (Tulip's immutable updates change the array
+// reference at every keystroke).
 function findLists(startFiber) {
   const all = [];
   const seenFibers = new Set();
@@ -194,17 +454,7 @@ function findLists(startFiber) {
     if (!master || cand.list.length > master.list.length) master = cand;
   }
 
-  let indexed = all.find((x) => arrayHasIndexes(x.list)) || null;
-  if (!indexed && master) {
-    let smallest = null;
-    for (const cand of all) {
-      if (cand.list === master.list) continue;
-      if (!smallest || cand.list.length < smallest.list.length) smallest = cand;
-    }
-    indexed = smallest;
-  }
-
-  return { master, indexed, all };
+  return { master, all };
 }
 
 // Cheap re-read for a previously-located list. Tulip almost always replaces
@@ -255,15 +505,26 @@ const SELECT_KEYS = [
 ];
 
 function findSelectHandler(startFiber, quiet = false) {
+  const found = findSelectHandlerFiber(startFiber);
+  if (!found) return null;
+  if (!quiet) {
+    log(
+      'select handler:',
+      found.key,
+      'on',
+      found.fiber.type?.displayName || found.fiber.type?.name || found.fiber.type,
+    );
+  }
+  return found.fn;
+}
+
+function findSelectHandlerFiber(startFiber) {
   for (const f of walkUp(startFiber)) {
     const p = f.memoizedProps;
     if (!p || typeof p !== 'object') continue;
     for (const k of SELECT_KEYS) {
       if (typeof p[k] === 'function') {
-        if (!quiet) {
-          log('select handler:', k, 'on', f.type?.displayName || f.type?.name || f.type);
-        }
-        return p[k];
+        return { fiber: f, key: k, fn: p[k] };
       }
     }
   }
@@ -288,26 +549,402 @@ function getLabel(item) {
   return JSON.stringify(item);
 }
 
-function pickLiveItem(state, item, i) {
-  const indexed = state.indexedList;
-  if (!Array.isArray(indexed) || indexed.length === 0) return item;
+function valueLooksLikeOption(v) {
+  if (!v || typeof v !== 'object' || Array.isArray(v)) return false;
+  if (typeof v.value !== 'string') return false;
+  if (typeof v.type !== 'string' && typeof v.display !== 'string') return false;
+  if (
+    typeof v.display !== 'string' &&
+    typeof v.displayName !== 'string' &&
+    typeof v.label !== 'string' &&
+    typeof v.text !== 'string' &&
+    typeof v.name !== 'string'
+  ) {
+    return false;
+  }
+  return true;
+}
+
+function labelsMatch(a, b) {
+  const x = (a ?? '').trim();
+  const y = (b ?? '').trim();
+  if (!x || !y) return false;
+  return x === y;
+}
+
+function getControllerSelectionRange(ctrl) {
+  if (!ctrl) return null;
+  try {
+    const anchor = ctrl.getSelectionAnchor?.();
+    const focus = ctrl.getSelectionFocus?.();
+    if (typeof anchor === 'number' && typeof focus === 'number') {
+      return { start: Math.min(anchor, focus), end: Math.max(anchor, focus) };
+    }
+  } catch (_) {}
+  return null;
+}
+
+// Find the React handler Tulip's virtualized row would fire on a real click.
+function findRowClickHandler(rowEl) {
+  const f = fiberOf(rowEl);
+  if (!f) return null;
+  let fallback = null;
+  const stack = [f];
+  let visits = 0;
+  while (stack.length && visits++ < 60) {
+    const fib = stack.pop();
+    if (!fib) continue;
+    const p = fib.memoizedProps;
+    if (p && typeof p === 'object') {
+      let hasItem = false;
+      for (const k of Object.keys(p)) {
+        if (valueLooksLikeOption(p[k])) hasItem = true;
+      }
+      for (const evt of ['onClick', 'onMouseDown']) {
+        if (typeof p[evt] === 'function') {
+          if (hasItem) return p[evt];
+          if (!fallback) fallback = p[evt];
+        }
+      }
+    }
+    if (fib.child) stack.push(fib.child);
+    if (fib.sibling) stack.push(fib.sibling);
+  }
+  return fallback;
+}
+
+function optionFromProps(p) {
+  if (!p || typeof p !== 'object') return null;
+  for (const k of Object.keys(p)) {
+    if (valueLooksLikeOption(p[k])) return { key: k, item: p[k] };
+  }
+  for (const k of ['item', 'option', 'data', 'row', 'suggestion']) {
+    const v = p[k];
+    if (valueLooksLikeOption(v)) return { key: k, item: v };
+  }
+  return null;
+}
+
+function findRowItemNear(node) {
+  let cur = node;
+  for (let depth = 0; cur && depth < 14; depth++) {
+    const f = fiberOf(cur);
+    if (f) {
+      const stack = [f];
+      let visits = 0;
+      while (stack.length && visits++ < 48) {
+        const fib = stack.pop();
+        if (!fib) continue;
+        const hit = optionFromProps(fib.memoizedProps);
+        if (hit) return hit;
+        if (fib.child) stack.push(fib.child);
+        if (fib.sibling) stack.push(fib.sibling);
+        if (fib.return) stack.push(fib.return);
+      }
+    }
+    cur = cur.parentElement;
+  }
+  return null;
+}
+
+function findItemByRowLabel(state, rowText) {
+  const label = (rowText ?? '').trim();
+  if (!label) return null;
+  const master = readArrayFrom(state.masterSource);
+  if (!Array.isArray(master)) return null;
+  const idx = masterIndexInList(master, { value: label });
+  if (idx < 0) {
+    const byLabel = master.find((row) => labelsMatch(getLabel(row), label));
+    return byLabel ?? null;
+  }
+  return master[idx];
+}
+
+// Replicate a native list-row click: Tulip's onClick closes over the item and
+// computes indexes from the live editor caret at invoke time.
+function rowMatchesItem(rowEl, item) {
+  const label = getLabel(item);
+  const text = (rowEl.textContent ?? '').trim();
+  if (labelsMatch(text, label)) return true;
   const targetValue = item && typeof item === 'object' ? item.value : undefined;
-  const targetLabel = getLabel(item);
-  const matches = indexed.filter((cand) => {
-    if (!cand || typeof cand !== 'object') return false;
-    if (targetValue && cand.value === targetValue) return true;
-    return getLabel(cand) === targetLabel;
+  if (!targetValue) return false;
+  const found = findRowItemNear(rowEl);
+  return !!(found?.item && found.item.value === targetValue);
+}
+
+function invokeNativeListRowSelect(state, item) {
+  const list = state.list;
+  if (!list) return false;
+  const rowEls = list.querySelectorAll(NATIVE_ROW_SEL);
+  const stubEvent = {
+    preventDefault() {},
+    stopPropagation() {},
+    currentTarget: null,
+    target: null,
+    nativeEvent: { stopImmediatePropagation() {} },
+  };
+  for (const rowEl of rowEls) {
+    if (!rowMatchesItem(rowEl, item)) continue;
+    const handler = findRowClickHandler(rowEl);
+    if (!handler) continue;
+    stubEvent.currentTarget = rowEl;
+    stubEvent.target = rowEl;
+    try {
+      handler(stubEvent);
+      return true;
+    } catch (e) {
+      logAt(LOG.select, 'native row handler threw:', e?.message || e);
+    }
+  }
+  return false;
+}
+
+function itemsMatch(a, b) {
+  if (!a || !b) return false;
+  if (typeof a === 'object' && typeof b === 'object') {
+    if (a.value && b.value && a.value === b.value) return true;
+    return labelsMatch(getLabel(a), getLabel(b));
+  }
+  return labelsMatch(String(a), getLabel(b));
+}
+
+// Row onClick from fiber when the DOM row exists but matching failed, or after scroll.
+function invokeNativeRowSelectFromFiber(state, item) {
+  const found = fiberOfNearestHost(state.list);
+  if (!found) return false;
+  const stubEvent = {
+    preventDefault() {},
+    stopPropagation() {},
+    currentTarget: null,
+    target: null,
+    nativeEvent: { stopImmediatePropagation() {} },
+  };
+  let handler = null;
+  let host = null;
+  const stack = [found.fiber];
+  let visits = 0;
+  while (stack.length && visits++ < 800) {
+    const fib = stack.pop();
+    if (!fib) continue;
+    const p = fib.memoizedProps;
+    if (p && typeof p === 'object') {
+      const hit = optionFromProps(p);
+      if (hit && itemsMatch(hit.item, item)) {
+        for (const evt of ['onClick', 'onMouseDown']) {
+          if (typeof p[evt] === 'function') {
+            handler = p[evt];
+            host = fib.stateNode;
+            break;
+          }
+        }
+        if (handler) break;
+      }
+    }
+    if (fib.child) stack.push(fib.child);
+    if (fib.sibling) stack.push(fib.sibling);
+  }
+  if (!handler) return false;
+  try {
+    stubEvent.currentTarget = host || state.list;
+    stubEvent.target = stubEvent.currentTarget;
+    handler(stubEvent);
+    return true;
+  } catch (e) {
+    logAt(LOG.select, 'fiber row handler threw:', e?.message || e);
+    return false;
+  }
+}
+
+function invokeNativeSelect(state, item) {
+  return invokeNativeListRowSelect(state, item) || invokeNativeRowSelectFromFiber(state, item);
+}
+
+function logSelectAfter(state, label, beforeText, selectSource) {
+  if (logLevel < LOG.select) return;
+  requestAnimationFrame(() => {
+    requestAnimationFrame(() => {
+      const tag =
+        capturePhase === 'enhanced'
+          ? `capture:pick→after:${selectSource}`
+          : `[select→after:${selectSource}]`;
+      const after = snapshotEditorText(state.editor);
+      const pending = capturePendingSelection(state);
+      logAt(LOG.select, tag, {
+        picked: label,
+        selectSource,
+        before: beforeText,
+        after,
+        delta: diffAround(beforeText ?? '', after ?? ''),
+        pending,
+        indexPreview: captureIndexPreview(state.editor, pending),
+        controller: captureControllerContext(state.editor),
+      });
+    });
   });
-  if (matches.length === 1) return matches[0];
-  if (matches.length > 1) {
-    const withIndexes = matches.find((cand) => cand && cand.indexes && typeof cand.indexes.start === 'number');
-    if (withIndexes) return withIndexes;
+}
+
+function isFieldItem(item) {
+  if (!item || typeof item !== 'object') return false;
+  if (item.type === 'field') return true;
+  return typeof item.value === 'string' && item.value.trimStart().startsWith('@');
+}
+
+// Tulip field suggestions use a leading @ and trailing space in `value`.
+function fieldReferenceText(item) {
+  const raw =
+    item && typeof item === 'object' && typeof item.value === 'string'
+      ? item.value
+      : getLabel(item);
+  const t = (raw ?? '').trimEnd();
+  if (!t) return '';
+  const withAt = t.startsWith('@') ? t : `@${t}`;
+  return withAt.endsWith(' ') ? withAt : `${withAt} `;
+}
+
+function editorHasPrimeArtifacts(editor) {
+  return (snapshotEditorText(editor) ?? '').includes('[object Object]');
+}
+
+function partialFilterQueryStillVisible(editor, pending) {
+  const q = pending?.filterQuery;
+  if (!q) return false;
+  const t = snapshotEditorText(editor) ?? '';
+  return t.includes(`+ ${q}`) || t.endsWith(q);
+}
+
+function fieldSuffix(item) {
+  const needle = fieldReferenceText(item).replace(/^@/, '').trim();
+  const marker = 'Current ';
+  const i = needle.indexOf(marker);
+  return i >= 0 ? needle.slice(i + marker.length).trim() : needle;
+}
+
+function fieldChipContains(editor, item) {
+  const suffix = fieldSuffix(item);
+  if (!suffix) return false;
+  for (const span of contentSpans(editor)) {
+    if (!spanIsFieldChip(span)) continue;
+    const st = (span.textContent ?? '').replace(/\u200b/g, '').trim();
+    if (st.endsWith(suffix) || st.includes(suffix)) return true;
   }
-  if (i >= 0 && i < indexed.length) {
-    const byIndex = indexed[i];
-    if (byIndex && getLabel(byIndex) === targetLabel) return byIndex;
+  return false;
+}
+
+function simulateEditorKeys(editor, parts) {
+  if (!editor) return false;
+  try {
+    editor.focus();
+  } catch (_) {}
+  for (const part of parts) {
+    if (part === 'Backspace') {
+      const e = { key: 'Backspace', code: 'Backspace', keyCode: 8, bubbles: true, cancelable: true };
+      editor.dispatchEvent(new KeyboardEvent('keydown', e));
+      editor.dispatchEvent(new KeyboardEvent('keyup', e));
+      continue;
+    }
+    for (const ch of part) {
+      const base = { bubbles: true, cancelable: true, composed: true, key: ch };
+      editor.dispatchEvent(new KeyboardEvent('keydown', { ...base, keyCode: ch.charCodeAt(0) }));
+      try {
+        editor.dispatchEvent(
+          new InputEvent('beforeinput', { ...base, inputType: 'insertText', data: ch }),
+        );
+        editor.dispatchEvent(new InputEvent('input', { ...base, inputType: 'insertText', data: ch }));
+      } catch (_) {}
+      editor.dispatchEvent(new KeyboardEvent('keyup', { ...base, keyCode: ch.charCodeAt(0) }));
+    }
   }
-  return item;
+  return true;
+}
+
+// Try typing the full `@…` path (Tulip parses it). Synthetic key events often only
+// reach delete — execCommand is attempted first.
+function typeFieldReference(state, item, pending) {
+  const text = fieldReferenceText(item);
+  if (!text || !pending) return false;
+  const start = pending.tokenStart;
+  const end = pendingDisplayEnd(pending);
+  if (typeof start !== 'number' || typeof end !== 'number' || end < start) return false;
+
+  const editor = state.editor;
+  try {
+    editor.focus();
+  } catch (_) {}
+
+  let method = 'keys';
+  for (let i = 0; i < end - start; i++) {
+    try {
+      document.execCommand('deleteBackward', false, null);
+    } catch (_) {}
+  }
+  try {
+    if (document.execCommand('insertText', false, text)) method = 'execCommand';
+  } catch (_) {}
+  if (method === 'keys') {
+    const parts = [];
+    for (let i = 0; i < end - start; i++) parts.push('Backspace');
+    parts.push(text);
+    simulateEditorKeys(editor, parts);
+  }
+  logAt(LOG.select, 'typed field reference', {
+    text: text.slice(0, 80),
+    tokenSpan: end - start,
+    method,
+  });
+  return true;
+}
+
+function fieldReferenceTypedOk(editor, item, pending) {
+  if (editorHasPrimeArtifacts(editor)) return false;
+  if (partialFilterQueryStillVisible(editor, pending)) return false;
+  return fieldChipContains(editor, item);
+}
+
+function cleanupPrimeArtifacts(editor) {
+  if (!editorHasPrimeArtifacts(editor)) return;
+  const junk = '[object Object]';
+  const parts = [];
+  for (let i = 0; i < junk.length; i++) parts.push('Backspace');
+  simulateEditorKeys(editor, parts);
+}
+
+function selectItemViaOnSelection(state, item, pending, ctrl, beforeText, label) {
+  cleanupPrimeArtifacts(state.editor);
+  const { indexes, source: indexSource } = resolveFuzzyControllerIndexes(
+    state.editor,
+    ctrl,
+    pending,
+  );
+  if (!indexes) {
+    logAt(LOG.select, 'cannot select — no controller indexes', { label, pending });
+    return;
+  }
+  const payload = buildFuzzyOnSelectPayload(item, indexes);
+  logAt(LOG.select, 'select via onSelection (fuzzy-only)', {
+    label,
+    selectSource: indexSource,
+    indexes,
+    displayIndexes: {
+      start: pending?.tokenStart,
+      end: pendingDisplayEnd(pending),
+    },
+    filterQuery: pending?.filterQuery,
+    tokenStart: pending?.tokenStart,
+    caretOffset: pending?.caretOffset,
+    controllerCursor: pending?.controllerCursor,
+    serializedLen: readControllerString(ctrl, state.editor)?.length ?? null,
+  });
+  try {
+    state.onSelect(payload);
+    try { state.editor.focus(); } catch (_) {}
+    try { ctrl.focus?.(); } catch (_) {}
+    logSelectAfter(state, label, beforeText, 'onSelection');
+  } catch (e) {
+    logAt(LOG.select, 'onSelect threw:', e?.message || e, 'payload=', {
+      value: payload?.value,
+      type: payload?.type,
+    });
+  }
 }
 
 // ---------- filter ----------
@@ -358,14 +995,44 @@ function fuzzyFilter(items, query) {
   return out;
 }
 
+// Cheap key so render() can tell when Enter should target a new first row.
+function filteredListKey(query, items) {
+  if (!items.length) return `${query}|0`;
+  const first = items[0];
+  const last = items[items.length - 1];
+  const fv =
+    first && typeof first === 'object' && typeof first.value === 'string'
+      ? first.value
+      : getLabel(first);
+  const lv =
+    last && typeof last === 'object' && typeof last.value === 'string'
+      ? last.value
+      : getLabel(last);
+  return `${query}|${items.length}|${fv}|${lv}`;
+}
+
 // ---------- styles ----------
 function ensureStyles() {
   if (document.getElementById(STYLE_ID)) return;
   const style = document.createElement('style');
   style.id = STYLE_ID;
   style.textContent = `
-    [${HIDE_REACT_LIST_ATTR}="true"] { display: none !important; }
+    /* visibility:hidden keeps row geometry for Tulip's Example/docs popper;
+       display:none collapses the list and pins that popper at (0,0). */
+    [${LIST_HOST_ATTR}] {
+      position: relative;
+    }
+    [${HIDE_REACT_LIST_ATTR}="true"] {
+      visibility: hidden !important;
+      pointer-events: none !important;
+      position: absolute !important;
+      top: 0 !important;
+      left: 0 !important;
+      z-index: 0 !important;
+    }
     .${OVERLAY_CLASS} {
+      position: relative;
+      z-index: 1;
       box-sizing: border-box;
       overflow: auto;
       font-family: "Noto Sans", sans-serif;
@@ -374,7 +1041,9 @@ function ensureStyles() {
       background: transparent;
     }
     .${ROW_CLASS} {
-      padding: 4px 12px;
+      box-sizing: border-box;
+      height: 25px;
+      padding: 3px 8px;
       line-height: 19px;
       cursor: pointer;
       white-space: nowrap;
@@ -383,6 +1052,9 @@ function ensureStyles() {
     }
     .${ROW_CLASS}:hover {
       background: rgba(28, 105, 225, 0.10);
+    }
+    .${FN_ROW_CLASS} {
+      text-transform: uppercase;
     }
     .${SELECTED_CLASS} {
       background: rgba(28, 105, 225, 0.20) !important;
@@ -401,13 +1073,8 @@ function removeStyles() {
 }
 
 // ---------- editor text + range ----------
-// Tulip's `onSelection` expects the item to carry an `indexes: {start, end}`
-// describing the range in the editor's textContent to splice the chosen
-// value over. The master suggestions list does NOT have those — Tulip's
-// own row click captures them from the editor's current cursor/token state
-// at click time. So we have to do the same: read the caret offset in the
-// `.content` contenteditable, walk outwards to the previous/next hard
-// separator, and pass that range alongside the picked item.
+// DOM token under the caret drives fuzzyFilter. Native picks use
+// invokeNativeListRowSelect; fuzzy-only picks use the same frozen token span.
 //
 // IMPORTANT: whitespace and `.` are intentionally NOT separators. Tulip
 // field labels routinely contain spaces and dots
@@ -440,12 +1107,6 @@ function chooseCursorEl(cursorContainer) {
     }
   }
   if (!cursorEl) cursorEl = cursorNodes[cursorNodes.length - 1];
-  if (traceSelect && cursorNodes.length > 1) {
-    log('[trace:caret]', {
-      cursorCount: cursorNodes.length,
-      chosenIndex: cursorNodes.indexOf(cursorEl),
-    });
-  }
   return cursorEl;
 }
 
@@ -465,14 +1126,73 @@ function contentSpans(editor) {
   );
 }
 
-function caretOffsetIn(editor) {
-  const content = editor.querySelector('.content');
-  const cursorContainer = editor.querySelector('.cursorContainer');
-  if (!content || !cursorContainer) return null;
-
-  const cursorEl = chooseCursorEl(cursorContainer);
+function caretOffsetFromGeometry(editor, cursorEl) {
   if (!cursorEl) return null;
+  let cursorRect;
+  try {
+    cursorRect = cursorEl.getBoundingClientRect();
+  } catch (_) {
+    return null;
+  }
+  const cx = cursorRect.left;
+  const cy = cursorRect.top + cursorRect.height / 2;
+  const spans = contentSpans(editor);
+  if (spans.length === 0) return null;
 
+  let hitSpan = null;
+  let hitRect = null;
+  let bestDist = Infinity;
+  for (const span of spans) {
+    let rects;
+    try {
+      rects = span.getClientRects();
+    } catch (_) {
+      continue;
+    }
+    for (let i = 0; i < rects.length; i++) {
+      const r = rects[i];
+      if (!r.width && !r.height) continue;
+      const onLine = cy >= r.top - 4 && cy <= r.bottom + 4;
+      if (!onLine) continue;
+      let xDist = 0;
+      if (cx < r.left) xDist = r.left - cx;
+      else if (cx > r.right) xDist = cx - r.right;
+      const dist = xDist;
+      if (dist < bestDist) {
+        bestDist = dist;
+        hitSpan = span;
+        hitRect = r;
+      }
+    }
+  }
+  if (!hitSpan || !hitRect) return null;
+
+  const base = parseInt(hitSpan.getAttribute('data-index'), 10);
+  if (Number.isNaN(base)) return null;
+  const spanText = (hitSpan.textContent ?? '').replace(/\u200b/g, '');
+  if (!spanText.length) return base;
+  const ratio = Math.max(0, Math.min(1, (cx - hitRect.left) / Math.max(hitRect.width, 1)));
+  return base + Math.round(ratio * spanText.length);
+}
+
+function offsetInCursorSegment(segment, cursorEl) {
+  const segText = (segment.textContent ?? '').replace(/\u200b/g, '');
+  let offsetInSeg = segText.length;
+  const walker = document.createTreeWalker(segment, NodeFilter.SHOW_ALL);
+  let node = walker.nextNode();
+  let seen = 0;
+  while (node) {
+    if (node === cursorEl) {
+      offsetInSeg = seen;
+      break;
+    }
+    if (node.nodeType === Node.TEXT_NODE) seen += (node.nodeValue ?? '').length;
+    node = walker.nextNode();
+  }
+  return offsetInSeg;
+}
+
+function caretOffsetFromDom(editor, cursorEl, cursorContainer) {
   const segment = cursorContainerSegment(cursorContainer, cursorEl);
   const spans = contentSpans(editor);
   if (segment) {
@@ -493,23 +1213,11 @@ function caretOffsetIn(editor) {
     if (span) {
       const base = parseInt(span.getAttribute('data-index'), 10);
       if (!Number.isNaN(base)) {
-        const offset = base + segText.length;
-        if (traceSelect) {
-          log('[trace:caret:data-index]', {
-            segIndex,
-            base,
-            segTextLen: segText.length,
-            offset,
-            spanClass: span.className,
-            matchedBy: spanFromText ? 'text' : 'index',
-          });
-        }
-        return offset;
+        return base + offsetInCursorSegment(segment, cursorEl);
       }
     }
   }
 
-  // Fallback: count text nodes in cursorContainer up to the cursor.
   let offset = 0;
   const walker = document.createTreeWalker(cursorContainer, NodeFilter.SHOW_ALL);
   let node = walker.nextNode();
@@ -521,19 +1229,112 @@ function caretOffsetIn(editor) {
   return null;
 }
 
+function caretOffsetIn(editor) {
+  const content = editor.querySelector('.content');
+  const cursorContainer = editor.querySelector('.cursorContainer');
+  if (!content || !cursorContainer) return null;
+
+  const cursorEl = chooseCursorEl(cursorContainer);
+  if (!cursorEl) return null;
+
+  const dom = caretOffsetFromDom(editor, cursorEl, cursorContainer);
+  const geom = caretOffsetFromGeometry(editor, cursorEl);
+  if (geom == null) return dom;
+  if (dom == null) return geom;
+
+  const activeDom = spanAtCaret(editor, dom);
+  const activeGeom = spanAtCaret(editor, geom);
+  const domInField =
+    activeDom && spanIsFieldChip(activeDom.span) && dom > activeDom.start && dom <= activeDom.end;
+  const geomInField =
+    activeGeom &&
+    spanIsFieldChip(activeGeom.span) &&
+    geom > activeGeom.start &&
+    geom <= activeGeom.end;
+  // After deleting a chip, cursorContainer segment index can drift into the
+  // next field chip while the visible caret sits in the gap — trust geometry.
+  if (domInField && !geomInField) return geom;
+  if (!domInField && geomInField) return dom;
+  // DOM mapping used to jump to segment end (e.g. `(Event)|` while typing `Event`).
+  if (Math.abs(dom - geom) === 1 && geom < dom) return geom;
+  if (Math.abs(dom - geom) > 1) return geom;
+
+  const ctrl = findController(editor);
+  if (ctrl) {
+    const ctrlPos = readControllerCursor(ctrl);
+    const mapped = mapControllerPosToDisplay(editor, ctrl, ctrlPos);
+    if (mapped != null) {
+      const activeDom = spanAtCaret(editor, dom);
+      const activeMapped = spanAtCaret(editor, mapped);
+      const domInFieldChip =
+        activeDom &&
+        spanIsFieldChip(activeDom.span) &&
+        dom > activeDom.start &&
+        dom <= activeDom.end;
+      const mappedInFieldChip =
+        activeMapped &&
+        spanIsFieldChip(activeMapped.span) &&
+        mapped > activeMapped.start &&
+        mapped <= activeMapped.end;
+      if (domInFieldChip && !mappedInFieldChip) return mapped;
+      if (dom == null) return mapped;
+    }
+  }
+  return dom;
+}
+
+// Tulip often updates cursorContainer before .content mirrors typed text
+// (e.g. function arguments like totext(event)).
+function tokenQueryFromCursorSegment(editor) {
+  const cursorContainer = editor.querySelector('.cursorContainer');
+  if (!cursorContainer) return null;
+  const cursorEl = chooseCursorEl(cursorContainer);
+  if (!cursorEl) return null;
+  const segment = cursorContainerSegment(cursorContainer, cursorEl);
+  if (!segment) return null;
+  const segText = (segment.textContent ?? '').replace(/\u200b/g, '');
+
+  const offsetInSeg = offsetInCursorSegment(segment, cursorEl);
+  let localStart = offsetInSeg;
+  while (localStart > 0 && !HARD_SEP_RE.test(segText[localStart - 1])) localStart--;
+  while (localStart < offsetInSeg && WS_RE.test(segText[localStart])) localStart++;
+  return segText.slice(localStart, offsetInSeg);
+}
+
+function mapControllerPosToDisplay(editor, ctrl, ctrlPos) {
+  if (typeof ctrlPos !== 'number' || ctrlPos < 0) return null;
+  const serialized = readControllerString(ctrl, editor);
+  if (!serialized || !controllerLooksSerialized(serialized)) return null;
+  const segments = buildDisplayControllerSegments(editor, serialized);
+  if (segments.length === 0) return null;
+  for (const seg of segments) {
+    if (ctrlPos < seg.c0 || ctrlPos > seg.c1) continue;
+    if (seg.isField) {
+      if (ctrlPos === seg.c0) return seg.d0;
+      if (ctrlPos === seg.c1) return seg.d1;
+      return null;
+    }
+    return seg.d0 + (ctrlPos - seg.c0);
+  }
+  const last = segments[segments.length - 1];
+  if (last && ctrlPos > last.c1) return last.d1 + (ctrlPos - last.c1);
+  return null;
+}
+
 function spanAtCaret(editor, caret) {
   const spans = contentSpans(editor);
   if (spans.length === 0 || caret == null) return null;
   for (let i = 0; i < spans.length; i++) {
     const start = parseInt(spans[i].getAttribute('data-index'), 10);
     if (Number.isNaN(start)) continue;
+    const spanText = (spans[i].textContent ?? '').replace(/\u200b/g, '');
     const nextStart =
       i + 1 < spans.length ? parseInt(spans[i + 1].getAttribute('data-index'), 10) : null;
     const end =
       nextStart != null && !Number.isNaN(nextStart)
         ? nextStart
-        : start + (spans[i].textContent?.length ?? 0);
-    if (caret >= start && (nextStart == null || caret < nextStart)) {
+        : start + spanText.length;
+    if (caret >= start && caret <= end) {
       return { span: spans[i], start, end };
     }
   }
@@ -545,6 +1346,19 @@ function getCurrentRange(editor) {
   const text = content?.textContent ?? '';
   let caret = caretOffsetIn(editor);
   if (caret == null || caret > text.length || caret < 0) caret = text.length;
+  // Caret on the trailing edge of a committed field chip — user finished that
+  // token (e.g. second Enter after picking a value in OBJECT({…})). Do not
+  // walk the chip text as the fuzzy token or Enter re-selects and splices the
+  // whole formula.
+  const chipAtCaret = spanAtCaret(editor, caret);
+  if (
+    chipAtCaret &&
+    spanIsFieldChip(chipAtCaret.span) &&
+    caret === chipAtCaret.end &&
+    caret > chipAtCaret.start
+  ) {
+    return { text, query: '', start: caret, end: caret, caret };
+  }
   // Walk BACK from the caret to find the token's start. Stop at the
   // previous hard separator (`+`, `-`, `(`, `'`, …). Spaces are NOT
   // separators — see HARD_SEP_RE comment.
@@ -557,47 +1371,362 @@ function getCurrentRange(editor) {
   // Do not walk back out of the segment that contains the caret (field chip,
   // string literal, or partial token being typed).
   const active = spanAtCaret(editor, caret);
-  if (active && start < active.start) start = active.start;
+  // Only clamp when the caret is inside the active span — not when typing
+  // past a field chip (caret > active.end), which wrongly pulled "eve" into
+  // the previous chip and overwrote Asset.ID.
+  if (active && caret <= active.end) {
+    // At the left edge of a chip the user may be replacing a deleted neighbor;
+    // allow walking back past hard separators (e.g. `+`) into the gap.
+    if (caret > active.start && start < active.start) start = active.start;
+  }
   // Walk FORWARD from the caret to find the token's end, so selecting
   // replaces the WHOLE token under the cursor — not just the prefix the
   // user has already typed. (For the common case of caret-at-end, this
   // is a no-op.)
   let end = caret;
   while (end < text.length && !HARD_SEP_RE.test(text[end])) end++;
-  if (active && end > active.end) end = active.end;
-  return { text, query: text.slice(start, caret), start, end };
+  if (active && caret <= active.end && end > active.end) end = active.end;
+
+  let query = text.slice(start, caret);
+  const segmentQuery = tokenQueryFromCursorSegment(editor);
+  if (segmentQuery != null && segmentQuery !== query) {
+    const useSegment =
+      !query || segmentQuery.startsWith(query) || query.length < segmentQuery.length;
+    if (useSegment) {
+      query = segmentQuery;
+      const hit = text.lastIndexOf(segmentQuery, caret);
+      if (hit >= 0) {
+        let newStart = hit;
+        while (newStart > 0 && !HARD_SEP_RE.test(text[newStart - 1])) newStart--;
+        while (newStart < hit && WS_RE.test(text[newStart])) newStart++;
+        if (newStart <= hit) start = newStart;
+      }
+    }
+  }
+  return { text, query, start, end, caret };
 }
 
-function resolveSelectionRange(state) {
-  if (state.pendingSelectionRange) {
-    return { range: state.pendingSelectionRange, source: 'pending' };
+// Editor controller — walk UP from the editor fiber (multiple instances exist).
+function findController(editor) {
+  const f = fiberOf(editor);
+  if (!f) return null;
+  const ok = (o) =>
+    o &&
+    typeof o === 'object' &&
+    typeof o.focus === 'function' &&
+    typeof o.getCursorPosition === 'function';
+  for (const fib of walkUp(f)) {
+    const sn = fib.stateNode;
+    if (ok(sn)) return sn;
   }
-  // Always trust the range from the last overlay render (last keystroke).
-  // A fresh read during Enter often snaps to an earlier field chip.
-  if (state.currentRange) {
-    return { range: state.currentRange, source: 'rendered' };
-  }
-  return { range: getCurrentRange(state.editor), source: 'fresh' };
+  return null;
 }
 
-// Tulip's onSelection splices from its internal caret, not our indexes.
-// Only nudge the caret forward — never ArrowLeft, which jumps into prior chips.
-function moveCaretToOffset(editor, targetOffset) {
-  const current = caretOffsetIn(editor);
-  if (current == null || targetOffset == null) return { from: current, to: targetOffset, moved: 0 };
-  const delta = targetOffset - current;
-  if (delta <= 0) return { from: current, to: targetOffset, moved: 0 };
-  for (let i = 0; i < delta; i++) {
-    editor.dispatchEvent(
-      new KeyboardEvent('keydown', {
-        key: 'ArrowRight',
-        code: 'ArrowRight',
-        bubbles: true,
-        cancelable: true,
-      }),
-    );
+// Snapshot from getCurrentRange() — token span and filterQuery must share one call.
+function pendingDisplayEnd(pending) {
+  const caret = pending?.caretOffset;
+  const tokenEnd = pending?.tokenEnd;
+  if (typeof caret !== 'number') return typeof tokenEnd === 'number' ? tokenEnd : null;
+  if (typeof tokenEnd === 'number') return Math.max(caret, tokenEnd);
+  return caret;
+}
+
+function capturePendingSelection(state) {
+  const range = state.currentRange;
+  const ctrl = state.editor ? findController(state.editor) : null;
+  return {
+    filterQuery: range?.query ?? '',
+    tokenStart: typeof range?.start === 'number' ? range.start : null,
+    tokenEnd: typeof range?.end === 'number' ? range.end : null,
+    caretOffset: typeof range?.caret === 'number' ? range.caret : null,
+    selection: ctrl ? getControllerSelectionRange(ctrl) : null,
+    controllerCursor: ctrl ? readControllerCursor(ctrl) : null,
+  };
+}
+
+function refreshPendingSelection(state) {
+  const range = getCurrentRange(state.editor);
+  state.currentRange = range;
+  return capturePendingSelection(state);
+}
+
+function readControllerCursor(ctrl) {
+  if (!ctrl) return null;
+  try {
+    const p = ctrl.getCursorPosition();
+    if (typeof p === 'number') return p;
+  } catch (_) {}
+  return null;
+}
+
+function tryReadSerializedString(v) {
+  return typeof v === 'string' && controllerLooksSerialized(v) ? v : null;
+}
+
+function readControllerStringFromFiber(editor) {
+  const f = fiberOf(editor);
+  if (!f) return null;
+  for (const fib of walkUp(f)) {
+    const sn = fib.stateNode;
+    if (sn && sn !== editor && typeof sn === 'object') {
+      for (const k of ['value', 'text', 'expression', 'formula', 'editorValue']) {
+        const hit = tryReadSerializedString(sn[k]);
+        if (hit) return hit;
+      }
+      for (const method of ['getValue', 'getText', 'getEditorValue']) {
+        try {
+          const fn = sn[method];
+          if (typeof fn === 'function') {
+            const hit = tryReadSerializedString(fn());
+            if (hit) return hit;
+          }
+        } catch (_) {}
+      }
+    }
+    const props = fib.memoizedProps;
+    if (props && typeof props === 'object') {
+      for (const k of ['value', 'text', 'expression', 'formula', 'editorValue']) {
+        const hit = tryReadSerializedString(props[k]);
+        if (hit) return hit;
+      }
+    }
+    let hook = fib.memoizedState;
+    for (let i = 0; hook && i < 60; i++, hook = hook.next) {
+      let v = hook.memoizedState;
+      const hit = tryReadSerializedString(v);
+      if (hit) return hit;
+      if (v && typeof v === 'object') {
+        const inner = tryReadSerializedString(v.value) || tryReadSerializedString(v.text);
+        if (inner) return inner;
+      }
+      if (Array.isArray(v) && v.length === 2) {
+        const hit2 = tryReadSerializedString(v[0]);
+        if (hit2) return hit2;
+      }
+    }
   }
-  return { from: current, to: targetOffset, moved: delta };
+  return null;
+}
+
+function readControllerString(ctrl, editor) {
+  if (ctrl) {
+    for (const method of ['getValue', 'getText', 'getEditorValue', 'getSerializedValue']) {
+      try {
+        const fn = ctrl[method];
+        if (typeof fn === 'function') {
+          const hit = tryReadSerializedString(fn());
+          if (hit) return hit;
+        }
+      } catch (_) {}
+    }
+    for (const k of ['value', 'text', 'serializedValue', 'editorValue']) {
+      const hit = tryReadSerializedString(ctrl[k]);
+      if (hit) return hit;
+    }
+  }
+  if (editor) return readControllerStringFromFiber(editor);
+  return null;
+}
+
+function controllerLooksSerialized(s) {
+  return typeof s === 'string' && (s.includes('\u001f') || s.includes('field_{'));
+}
+
+function fieldBlobLengthAt(serialized, pos) {
+  if (pos >= serialized.length) return 0;
+  if (serialized[pos] !== '\u001f') {
+    const next = serialized.indexOf('\u001f', pos);
+    return next >= 0 ? next - pos : serialized.length - pos;
+  }
+  const after = pos + 1;
+  if (serialized.startsWith('field_{', after)) {
+    let j = serialized.indexOf('{', after);
+    let depth = 0;
+    while (j < serialized.length) {
+      const ch = serialized[j];
+      if (ch === '{') depth++;
+      else if (ch === '}') {
+        depth--;
+        if (depth === 0) {
+          j++;
+          break;
+        }
+      }
+      j++;
+    }
+    if (serialized[j] === '\u001f') j++;
+    return j - pos;
+  }
+  const next = serialized.indexOf('\u001f', pos + 1);
+  return next >= 0 ? next - pos : serialized.length - pos;
+}
+
+function buildDisplayControllerSegments(editor, serialized) {
+  const segments = [];
+  const spans = contentSpans(editor);
+  let d = 0;
+  let c = 0;
+  for (const span of spans) {
+    const text = (span.textContent ?? '').replace(/\u200b/g, '');
+    const isField = spanIsFieldChip(span);
+    const d0 = d;
+    const d1 = d + text.length;
+    const c0 = c;
+    const c1 = c + (isField ? fieldBlobLengthAt(serialized, c) : text.length);
+    segments.push({ d0, d1, c0, c1, isField });
+    d = d1;
+    c = c1;
+  }
+  const tail = editor.querySelector('.content')?.textContent ?? '';
+  if (d < tail.length) {
+    segments.push({
+      d0: d,
+      d1: tail.length,
+      c0: c,
+      c1: c + (tail.length - d),
+      isField: false,
+    });
+  }
+  return segments;
+}
+
+// When serialized value is unavailable, field blobs are ~11 chars longer than display.
+function mapDisplayRangeHeuristic(editor, displayStart, displayEnd) {
+  const spans = contentSpans(editor);
+  let ctrl = 0;
+  let d = 0;
+  let ctrlStart = null;
+  let ctrlEnd = null;
+  for (const span of spans) {
+    const text = (span.textContent ?? '').replace(/\u200b/g, '');
+    const isField = spanIsFieldChip(span);
+    const d0 = d;
+    const d1 = d + text.length;
+    const c0 = ctrl;
+    const cLen = isField ? text.length + 11 + Math.max(0, text.length - 24) : text.length;
+    const c1 = ctrl + cLen;
+    if (displayStart >= d0 && displayStart < d1) {
+      if (isField && displayStart > d0) return null;
+      ctrlStart = c0 + (displayStart - d0);
+    }
+    if (displayEnd > d0 && displayEnd <= d1) {
+      if (isField && displayEnd < d1) return null;
+      ctrlEnd = c0 + (displayEnd - d0);
+    }
+    d = d1;
+    ctrl = c1;
+  }
+  const tail = editor.querySelector('.content')?.textContent ?? '';
+  if (d < tail.length) {
+    const c0 = ctrl;
+    if (displayStart >= d) ctrlStart = c0 + (displayStart - d);
+    if (displayEnd >= d) ctrlEnd = c0 + (displayEnd - d);
+  }
+  if (ctrlStart == null || ctrlEnd == null) return null;
+  return { start: ctrlStart, end: ctrlEnd };
+}
+
+function mapDisplayRangeToController(ctrl, editor, displayStart, displayEnd) {
+  const serialized = readControllerString(ctrl, editor);
+  if (!serialized || !controllerLooksSerialized(serialized)) {
+    const heuristic = mapDisplayRangeHeuristic(editor, displayStart, displayEnd);
+    return heuristic ?? { start: displayStart, end: displayEnd };
+  }
+  const segments = buildDisplayControllerSegments(editor, serialized);
+  if (segments.length === 0) {
+    return { start: displayStart, end: displayEnd };
+  }
+
+  let ctrlStart = null;
+  let ctrlEnd = null;
+  for (const seg of segments) {
+    if (displayStart >= seg.d0 && displayStart < seg.d1) {
+      if (seg.isField && displayStart > seg.d0) return null;
+      ctrlStart = seg.c0 + (displayStart - seg.d0);
+    }
+    if (displayEnd > seg.d0 && displayEnd <= seg.d1) {
+      if (seg.isField && displayEnd < seg.d1) return null;
+      ctrlEnd = seg.c0 + (displayEnd - seg.d0);
+    }
+  }
+  const last = segments[segments.length - 1];
+  if (ctrlStart == null && last && displayStart >= last.d1) {
+    ctrlStart = last.c1 + (displayStart - last.d1);
+  }
+  if (ctrlEnd == null && last && displayEnd >= last.d1) {
+    ctrlEnd = last.c1 + (displayEnd - last.d1);
+  }
+  if (ctrlStart == null || ctrlEnd == null) return null;
+  return { start: ctrlStart, end: ctrlEnd };
+}
+
+function spanIsFieldChip(span) {
+  const cls = span.className;
+  if (typeof cls === 'string') return cls.includes('field');
+  if (cls && typeof cls.baseVal === 'string') return cls.baseVal.includes('field');
+  return false;
+}
+
+// Use frozen getCurrentRange() start/caret (same coords as filtering). Reject only
+// when the range is strictly inside a committed field chip (not partial @ tokens).
+function resolveFuzzyControllerIndexes(editor, ctrl, pending) {
+  if (!editor || !pending) return { indexes: null, source: null };
+
+  const liveSel = getControllerSelectionRange(ctrl);
+  if (liveSel && liveSel.end > liveSel.start) {
+    return { indexes: liveSel, source: 'live-controller-selection' };
+  }
+
+  const displayStart = pending.tokenStart;
+  const displayEnd = pendingDisplayEnd(pending);
+  if (typeof displayStart !== 'number' || typeof displayEnd !== 'number') {
+    return { indexes: null, source: null };
+  }
+  if (displayEnd < displayStart) {
+    return { indexes: null, source: null };
+  }
+
+  const spans = contentSpans(editor);
+  let displayPos = 0;
+  for (let i = 0; i < spans.length; i++) {
+    const span = spans[i];
+    const spanText = (span.textContent ?? '').replace(/\u200b/g, '');
+    const d0 = displayPos;
+    const d1 = displayPos + spanText.length;
+    if (spanIsFieldChip(span) && displayStart > d0 && displayEnd < d1) {
+      return { indexes: null, source: 'inside-field-chip' };
+    }
+    displayPos = d1;
+  }
+
+  const mapped = mapDisplayRangeToController(ctrl, editor, displayStart, displayEnd);
+  if (!mapped) {
+    return { indexes: null, source: 'map-failed' };
+  }
+  const serialized = readControllerString(ctrl, editor);
+  let source = 'frozen-token-range';
+  if (controllerLooksSerialized(serialized)) source = 'display-to-controller';
+  else if (mapped.start !== displayStart || mapped.end !== displayEnd) {
+    source = 'display-heuristic';
+  }
+  return { indexes: mapped, source };
+}
+
+function buildFuzzyOnSelectPayload(item, indexes) {
+  const label = getLabel(item);
+  const value =
+    item && typeof item === 'object' && typeof item.value === 'string' ? item.value : label;
+  const type =
+    item && typeof item === 'object' && typeof item.type === 'string'
+      ? item.type
+      : typeof value === 'string' && value.startsWith('@')
+        ? 'field'
+        : 'function';
+  return {
+    value,
+    type,
+    indexes: { start: indexes.start, end: indexes.end },
+  };
 }
 
 // ---------- overlay ----------
@@ -608,6 +1737,7 @@ function buildOverlay(popper) {
   if (!wrapper) return null;
   const width = list.style.width || '348px';
   const height = list.style.height || '200px';
+  wrapper.setAttribute(LIST_HOST_ATTR, 'true');
   list.setAttribute(HIDE_REACT_LIST_ATTR, 'true');
   const overlay = document.createElement('div');
   overlay.className = OVERLAY_CLASS;
@@ -621,21 +1751,21 @@ function render(state) {
   const { overlay, editor } = state;
   if (!overlay) return;
   // React renders are immutable — the props.suggestions reference we cached
-  // at attach time will go stale as soon as the user types. Re-read it (and
-  // Tulip's currently-visible indexed list) on every render via the
-  // fiber+key source we saved.
+  // at attach time will go stale as soon as the user types. Re-read it on
+  // every render via the fiber+key source we saved.
   const liveMaster = readArrayFrom(state.masterSource);
   if (liveMaster) state.masterList = liveMaster;
-  const liveIndexed = readArrayFrom(state.indexedSource);
-  if (liveIndexed) state.indexedList = liveIndexed;
   const range = getCurrentRange(editor);
   state.currentRange = range;
   const query = range.query;
   state.filtered = fuzzyFilter(state.masterList, query);
-  if (state.selectedIndex >= state.filtered.length) {
-    state.selectedIndex = state.filtered.length - 1;
-  }
-  if (state.selectedIndex < 0 && state.filtered.length > 0) {
+  const listKey = filteredListKey(query, state.filtered);
+  if (listKey !== state.filterListKey) {
+    state.filterListKey = listKey;
+    state.selectedIndex = 0;
+  } else if (state.selectedIndex >= state.filtered.length) {
+    state.selectedIndex = Math.max(0, state.filtered.length - 1);
+  } else if (state.selectedIndex < 0 && state.filtered.length > 0) {
     state.selectedIndex = 0;
   }
 
@@ -645,137 +1775,85 @@ function render(state) {
     empty.className = EMPTY_CLASS;
     empty.textContent = query ? `No fuzzy matches for "${query}"` : 'No options';
     overlay.appendChild(empty);
+    scheduleCaptureRenderLog(state, range, query);
     return;
   }
   for (let i = 0; i < state.filtered.length; i++) {
     const item = state.filtered[i];
     const row = document.createElement('div');
     row.className = ROW_CLASS;
+    if (!isFieldItem(item)) row.classList.add(FN_ROW_CLASS);
     if (i === state.selectedIndex) row.classList.add(SELECTED_CLASS);
     row.textContent = getLabel(item);
     const idx = i;
     row.addEventListener('mousedown', (e) => {
       e.preventDefault();
-      state.pendingSelectionRange = state.currentRange || getCurrentRange(state.editor);
+      // Do not focus the editor here — it jumps the controller caret into the
+      // first chip. pendingSelection is frozen from the last overlay render.
+      state.pendingSelection = capturePendingSelection(state);
     });
-    row.addEventListener('click', (e) => {
+    row.addEventListener('mouseup', (e) => {
+      if (e.button !== 0) return;
       e.preventDefault();
       e.stopPropagation();
       selectItem(state, idx);
     });
     overlay.appendChild(row);
   }
-}
-
-// Dispatch synthetic Backspace keydown events at the editor host so
-// Tulip's custom keydown handler processes them as real deletes. We use
-// native KeyboardEvent (so it bubbles through React's event delegation
-// path) with the legacy `keyCode`/`which` fields populated, since some
-// older custom editor implementations check them.
-function sendBackspaces(editor, count) {
-  for (let i = 0; i < count; i++) {
-    const ev = new KeyboardEvent('keydown', {
-      key: 'Backspace',
-      code: 'Backspace',
-      keyCode: 8,
-      which: 8,
-      bubbles: true,
-      cancelable: true,
-    });
-    editor.dispatchEvent(ev);
-  }
+  scheduleCaptureRenderLog(state, range, query);
 }
 
 function selectItem(state, i) {
   const item = state.filtered[i];
   if (!item) return;
-  const { range: live, source: liveSource } = resolveSelectionRange(state);
-  state.pendingSelectionRange = null;
-  if (!live) {
-    log('no range — cannot select');
+
+  const pending = state.pendingSelection ?? refreshPendingSelection(state);
+  const activeQuery = (pending?.filterQuery ?? '').trim();
+  const tokenEnd = pendingDisplayEnd(pending);
+  if (
+    !activeQuery &&
+    typeof pending?.tokenStart === 'number' &&
+    tokenEnd === pending.tokenStart
+  ) {
+    logAt(LOG.select, 'select skipped — no active token', { label: getLabel(item) });
     return;
   }
-  const caretMove = moveCaretToOffset(state.editor, live.end);
-  // CRUCIAL: Tulip's `onSelection` ignores the `.indexes` we pass and
-  // instead computes its own splice range internally by walking back
-  // from the caret to the previous WHITESPACE — i.e. it is strictly
-  // space-tokenized. Our tokenizer is wider (it stops at operators, not
-  // whitespace) so a query like `date up` is meant to be replaced as a
-  // whole, but Tulip would only replace `up` and leave a dangling `date `
-  // in front. Bridge the gap by issuing synthetic Backspace keydowns for
-  // each char between our intended start and Tulip's whitespace-based
-  // start. After those deletes Tulip's idea of the "current token"
-  // matches what the user actually typed, and the splice is correct.
-  //
-  // Note that for queries whose token doesn't include any internal
-  // whitespace (e.g. `@User.Id`, `@upda`) this is a no-op — `extra` is 0
-  // — so it doesn't change any of the cases that already work.
-  let tulipStart = live.end;
-  while (tulipStart > 0 && !WS_RE.test(live.text[tulipStart - 1])) tulipStart--;
-  const extra = Math.max(0, tulipStart - live.start);
-  if (extra > 0) sendBackspaces(state.editor, extra);
+  state.pendingSelection = null;
+  const beforeText = snapshotEditorText(state.editor);
+  const label = getLabel(item);
+  const ctrl = findController(state.editor);
 
-  // Re-resolve onSelect on the CURRENT fiber. Tulip recreates the
-  // handler on every render and the handler's closure captures the
-  // editor's tokenizer state at creation time. After our Backspaces the
-  // editor has re-rendered, so a stale handler reference would be working
-  // off pre-delete state. Grabbing the freshest version avoids that.
-  let onSelect = state.onSelect;
-  try {
-    const found = fiberOfNearestHost(state.list);
-    if (found) {
-      const fresh = findSelectHandler(found.fiber, /*quiet=*/ true);
-      if (typeof fresh === 'function') onSelect = fresh;
+  const fallbackOnSelection = () => {
+    if (ctrl && typeof state.onSelect === 'function') {
+      selectItemViaOnSelection(state, item, pending, ctrl, beforeText, label);
+    } else {
+      logAt(LOG.select, 'cannot select', { label });
     }
-  } catch (_) {}
+  };
 
-  // Prefer the live Tulip item when we can resolve it; it may carry
-  // metadata not present on the master catalog item.
-  const liveItem = pickLiveItem(state, item, i);
-
-  // We pass indexes for completeness — but Tulip recomputes its own
-  // range internally, so really only the deletes above and the `.value`
-  // / `.type` on the payload matter.
-  const indexes = { start: live.start, end: live.end - extra };
-  const payload = Object.assign({}, liveItem, { indexes });
-  const beforeText = traceSelect ? snapshotEditorText(state.editor) : null;
-  log('selecting', {
-    label: getLabel(item),
-    value: item.value,
-    payloadLabel: getLabel(liveItem),
-    payloadValue: liveItem && typeof liveItem === 'object' ? liveItem.value : undefined,
-    payloadHasIndexes:
-      !!(liveItem && typeof liveItem === 'object' && liveItem.indexes && typeof liveItem.indexes.start === 'number'),
-    extra,
-    originalRange: { start: live.start, end: live.end },
-    indexesPassed: indexes,
-    query: live.query,
-    handlerFresh: onSelect !== state.onSelect,
-    liveSource,
-    caretMove,
-  });
-  try {
-    onSelect(payload);
-    if (traceSelect) {
+  // Fields: try typing `@Table Record…` (Tulip auto-parses); else Tulip's onSelection.
+  if (isFieldItem(item)) {
+    typeFieldReference(state, item, pending);
+    requestAnimationFrame(() => {
       requestAnimationFrame(() => {
-        requestAnimationFrame(() => {
-          const afterText = snapshotEditorText(state.editor);
-          log('[trace:select→after]', {
-            picked: getLabel(item),
-            payload: getLabel(liveItem),
-            before: beforeText,
-            after: afterText,
-            delta: diffAround(beforeText ?? '', afterText ?? ''),
-          });
-        });
+        if (fieldReferenceTypedOk(state.editor, item, pending)) {
+          logSelectAfter(state, label, beforeText, 'type-field');
+          return;
+        }
+        logAt(LOG.select, 'type-field failed — onSelection', { label });
+        fallbackOnSelection();
       });
-    }
-  } catch (e) {
-    log('onSelect threw:', e?.message || e, 'payload=', payload);
-    try {
-      log('onSelection.toString() =\n' + String(onSelect).slice(0, 1500));
-    } catch (_) {}
+    });
+    return;
   }
+
+  // Functions/operators: same as a native list pick when possible.
+  if (invokeNativeSelect(state, item)) {
+    logAt(LOG.select, 'select via native row onClick', { label });
+    logSelectAfter(state, label, beforeText, 'native');
+    return;
+  }
+  fallbackOnSelection();
 }
 
 function moveSelection(state, delta) {
@@ -810,19 +1888,56 @@ function findActiveStateForTarget(target) {
   return null;
 }
 
+function findSaveButton(editor) {
+  const popper = editor.closest(POPPER_SEL);
+  const scope =
+    popper?.closest('[role="dialog"]') ||
+    popper?.parentElement ||
+    document;
+  return scope.querySelector(SAVE_BTN_SEL);
+}
+
+function ensureSaveButtonHint(editor) {
+  const btn = findSaveButton(editor);
+  if (!btn || btn.hasAttribute(SAVE_HINT_ATTR)) return;
+  const base = (btn.getAttribute('aria-label') || btn.textContent || 'Save').trim();
+  const hint = `${base} (Ctrl+Enter)`;
+  btn.setAttribute('aria-label', hint);
+  btn.setAttribute('title', hint);
+  btn.setAttribute(SAVE_HINT_ATTR, 'true');
+}
+
+function isSaveShortcut(e) {
+  return e.key === 'Enter' && (e.ctrlKey || e.metaKey) && !e.altKey && !e.shiftKey;
+}
+
 function onGlobalKeyDown(e) {
   if (!enabled) return;
-  if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp' && e.key !== 'Enter') return;
   const state = findActiveStateForTarget(e.target);
+  if (state && isSaveShortcut(e)) {
+    const saveBtn = findSaveButton(state.editor);
+    if (saveBtn && !saveBtn.disabled) {
+      e.preventDefault();
+      e.stopPropagation();
+      if (typeof e.stopImmediatePropagation === 'function') e.stopImmediatePropagation();
+      saveBtn.click();
+    }
+    return;
+  }
+  if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp' && e.key !== 'Enter') return;
   if (!state) return;
-  if (e.key === 'Enter' && state.filtered.length === 0) return;
+  if (e.key === 'Enter') {
+    const range = getCurrentRange(state.editor);
+    state.currentRange = range;
+    if (!range.query.trim()) return;
+    if (state.filtered.length === 0) return;
+  }
   e.preventDefault();
   e.stopPropagation();
   if (typeof e.stopImmediatePropagation === 'function') e.stopImmediatePropagation();
   if (e.key === 'ArrowDown') moveSelection(state, 1);
   else if (e.key === 'ArrowUp') moveSelection(state, -1);
   else {
-    if (state.currentRange) state.pendingSelectionRange = state.currentRange;
     selectItem(state, state.selectedIndex);
   }
 }
@@ -835,14 +1950,42 @@ function installGlobalKeyHandler() {
 }
 
 // ---------- attach/detach ----------
+// Tulip often keeps the same `[data-testid="popper"]` across close/reopen while
+// React remounts the list (and our overlay). Treat attachment as live only when
+// the cached list/editor nodes are still the ones inside the popper.
+function attachmentLive(popper, state) {
+  if (!state) return false;
+  const editor = popper.querySelector(EDITOR_SEL);
+  const list = popper.querySelector(LIST_SEL);
+  return !!(
+    editor &&
+    list &&
+    state.editor === editor &&
+    state.list === list &&
+    state.overlay?.isConnected &&
+    popper.contains(state.overlay)
+  );
+}
+
+function dropStalePopperAttachment(popper) {
+  if (!popperState.has(popper)) return false;
+  const state = popperState.get(popper);
+  if (attachmentLive(popper, state)) return false;
+  detachFromPopper(popper);
+  return true;
+}
+
 function attachToPopper(popper) {
-  if (popperState.has(popper)) return;
+  if (popperState.has(popper)) {
+    if (attachmentLive(popper, popperState.get(popper))) return;
+    detachFromPopper(popper);
+  }
   const editor = popper.querySelector(EDITOR_SEL);
   if (!editor) return;
   const list = popper.querySelector(LIST_SEL);
   if (!list) return;
 
-  log('candidate popper, looking up React fiber…', popper);
+  log('candidate popper, looking up React fiber…', domDescriptor(popper));
 
   const found = fiberOfNearestHost(list);
   if (!found) {
@@ -862,7 +2005,7 @@ function attachToPopper(popper) {
   }
   const listFiber = found.fiber;
 
-  const { master, indexed } = findLists(listFiber);
+  const { master } = findLists(listFiber);
   if (!master) {
     log(
       'no master list found on fiber chain. Dumping summary:',
@@ -878,16 +2021,6 @@ function attachToPopper(popper) {
     'sample[0]',
     master.list[0],
   );
-  if (indexed) {
-    log(
-      'indexed (context) list:',
-      `${indexed.key.kind}.${indexed.key.name}`,
-      'len',
-      indexed.list.length,
-      'sample[0]',
-      indexed.list[0],
-    );
-  }
 
   const select = findSelectHandler(listFiber);
   if (!select) {
@@ -908,12 +2041,9 @@ function attachToPopper(popper) {
     overlay,
     masterList: master.list,
     masterSource: master,
-    indexedList: indexed?.list || null,
-    indexedSource: indexed || null,
     onSelect: select,
     selectedIndex: 0,
     filtered: [],
-    pendingSelectionRange: null,
   };
 
   const editorObs = new MutationObserver(() => render(state));
@@ -925,6 +2055,7 @@ function attachToPopper(popper) {
   state.editorObs = editorObs;
 
   popperState.set(popper, state);
+  ensureSaveButtonHint(editor);
   render(state);
   log('attached');
 }
@@ -935,6 +2066,7 @@ function detachFromPopper(popper) {
   state.editorObs?.disconnect();
   state.overlay?.remove();
   state.list?.removeAttribute(HIDE_REACT_LIST_ATTR);
+  state.list?.parentElement?.removeAttribute(LIST_HOST_ATTR);
   popperState.delete(popper);
 }
 
@@ -998,11 +2130,18 @@ function requestScan() {
 function onMutation(mutations) {
   for (const m of mutations) {
     if (m.type === 'attributes' && m.target instanceof Element) {
-      // We only care about attribute flips on a popper that *might* be ours.
+      // Style/class flips when a hidden popper is shown again often do not add
+      // nodes — still re-check attachment so close/reopen can recover.
       const popper = m.target.matches?.(POPPER_SEL)
         ? m.target
         : m.target.closest?.(POPPER_SEL);
-      if (popper && !popperState.has(popper)) requestScan();
+      if (popper) {
+        if (popperState.has(popper) && dropStalePopperAttachment(popper)) {
+          requestScan();
+        } else if (!popperState.has(popper)) {
+          requestScan();
+        }
+      }
       continue;
     }
     for (const node of m.addedNodes) {
@@ -1019,8 +2158,22 @@ function onMutation(mutations) {
     }
     for (const node of m.removedNodes) {
       if (!(node instanceof Element)) continue;
-      if (popperState.has(node)) detachFromPopper(node);
+      if (popperState.has(node)) {
+        detachFromPopper(node);
+        continue;
+      }
+      const popper = node.closest?.(POPPER_SEL);
+      if (popper && popperState.has(popper) && dropStalePopperAttachment(popper)) {
+        requestScan();
+      }
       if (observePoppers.has(node)) detachObservePopper(node);
+      else {
+        const obsPopper = node.closest?.(POPPER_SEL);
+        if (obsPopper && observePoppers.has(obsPopper)) {
+          const s = observePoppers.get(obsPopper);
+          if (node === s.list || node === s.editor) detachObservePopper(obsPopper);
+        }
+      }
     }
   }
 }
@@ -1053,12 +2206,11 @@ function detachAll() {
 // touch the UI — no overlay, no list hide. Just tails every render and
 // every row click so we can see exactly what Tulip is doing:
 //
-//   __tulbeltFuzzy.observe(true)   // start session-only logging
-//   __tulbeltFuzzy.observe(false)  // stop
-//   __tulbeltFuzzy.observe()       // toggle
+//   __tulbeltFuzzy.capture()     // start (auto baseline vs enhanced from fuzzy toggle)
+//   __tulbeltFuzzy.copyLog()       // export; tags phase + archives lastBaseline/Enhanced
+//   __tulbeltFuzzy.capture(false)  // stop
 //
-// Most useful with the fuzzy override OFF (popup toggle), so Tulip's own
-// UI is intact and clickable and you can compare its behavior to ours.
+// `observe(true)` — low-level shadow logger without capture session tagging.
 let observing = false;
 const observePoppers = new WeakMap();
 
@@ -1067,93 +2219,93 @@ function snapshotEditorText(editor) {
   return content?.textContent ?? '';
 }
 
-// Shape-match an arbitrary value against "looks like a Tulip suggestion".
-// Tulip items have `value: string` plus at least one display-ish string
-// (display/displayName/label/text) plus typically `type: string`. We do
-// NOT require `.indexes` here — empirically Tulip computes those at click
-// time and they are never on the prop, so requiring them returned null
-// for every observe click in the last session.
-function valueLooksLikeOption(v) {
-  if (!v || typeof v !== 'object' || Array.isArray(v)) return false;
-  if (typeof v.value !== 'string') return false;
-  if (typeof v.type !== 'string' && typeof v.display !== 'string') return false;
-  if (
-    typeof v.display !== 'string' &&
-    typeof v.displayName !== 'string' &&
-    typeof v.label !== 'string' &&
-    typeof v.text !== 'string' &&
-    typeof v.name !== 'string'
-  ) {
-    return false;
-  }
-  return true;
+function snapshotContentSpans(editor) {
+  return contentSpans(editor).map((span) => ({
+    dataIndex: span.getAttribute('data-index'),
+    len: (span.textContent ?? '').replace(/\u200b/g, '').length,
+    text: (span.textContent ?? '').replace(/\u200b/g, '').slice(0, 60),
+    class: span.className || undefined,
+  }));
 }
 
-// Walk fibers up from a clicked DOM node looking for a prop whose value
-// is a Tulip-shaped suggestion. That prop is the row's `item` /
-// `suggestion` / `option` — the very thing Tulip will spread into the
-// onSelection call.
-function findRowItemNear(node) {
-  let cur = node;
-  for (let depth = 0; cur && depth < 12; depth++) {
-    const f = fiberOf(cur);
-    if (f) {
-      let j = 0;
-      for (const fib of walkUp(f)) {
-        if (j++ > 12) break;
-        const p = fib.memoizedProps;
-        if (!p || typeof p !== 'object') continue;
-        for (const k of Object.keys(p)) {
-          if (valueLooksLikeOption(p[k])) return { key: k, item: p[k] };
+function captureControllerContext(editor) {
+  const ctrl = editor ? findController(editor) : null;
+  const range = editor ? getCurrentRange(editor) : null;
+  return {
+    domRange: range
+      ? {
+          query: range.query,
+          start: range.start,
+          end: range.end,
+          caret: range.caret,
         }
-      }
-    }
-    cur = cur.parentElement;
-  }
-  return null;
+      : null,
+    caretOffsetIn: editor ? caretOffsetIn(editor) : null,
+    controllerCursor: ctrl ? readControllerCursor(ctrl) : null,
+    controllerSelection: ctrl ? getControllerSelectionRange(ctrl) : null,
+    contentSpans: editor ? snapshotContentSpans(editor) : null,
+  };
 }
 
-// Read every currently-rendered row's item out of the virtualized list's
-// DOM by walking each row's React fiber. This is our most reliable signal
-// for "what would Tulip show right now?" — it sidesteps the question of
-// where exactly Tulip caches the filtered array in state/props, because
-// by definition the items rendered to the DOM are the post-filter result.
-// With virtualization only the visible rows are in the DOM, but for the
-// small filter results we care about (1-handful of items, e.g. when the
-// user is mid-typing) the entire filter is visible.
-function readVisibleRowItems(list) {
-  if (!list) return [];
-  const rowEls = list.querySelectorAll(
-    '.ReactVirtualized__Grid__innerScrollContainer > div',
-  );
-  const seen = new Set();
-  const items = [];
-  for (const rowEl of rowEls) {
-    const f = fiberOf(rowEl);
-    if (!f) continue;
-    // DFS into the row's subtree looking for the item prop. Most virtualized
-    // libs wrap the user's row in a positioned wrapper, so the actual row
-    // component (with the item prop) is 1-2 fibers deeper.
-    const stack = [f];
-    let visits = 0;
-    while (stack.length && visits++ < 40) {
-      const fib = stack.pop();
-      if (!fib) continue;
-      const p = fib.memoizedProps;
-      if (p && typeof p === 'object') {
-        for (const k of Object.keys(p)) {
-          if (valueLooksLikeOption(p[k]) && !seen.has(p[k])) {
-            seen.add(p[k]);
-            items.push(p[k]);
-            break;
-          }
-        }
-      }
-      if (fib.child) stack.push(fib.child);
-      if (fib.sibling) stack.push(fib.sibling);
-    }
+function sanitizeSelectionPayload(payload) {
+  if (!payload || typeof payload !== 'object') return payload;
+  const out = {};
+  for (const k of ['value', 'type', 'display', 'displayName', 'label', 'indexes']) {
+    if (payload[k] !== undefined) out[k] = sanitizeForExport(payload[k]);
   }
-  return items;
+  if (Object.keys(out).length === 0) return sanitizeForExport(payload);
+  return out;
+}
+
+function masterIndexInList(list, item) {
+  if (!Array.isArray(list) || !item) return -1;
+  const targetValue = typeof item === 'object' ? item.value : undefined;
+  const targetLabel = getLabel(item);
+  for (let i = 0; i < list.length; i++) {
+    const row = list[i];
+    if (!row) continue;
+    if (targetValue && row.value === targetValue) return i;
+    if (labelsMatch(getLabel(row), targetLabel)) return i;
+  }
+  return -1;
+}
+
+function wrapObserveSelectHandler(state) {
+  if (state.selectWrap) return;
+  const found = fiberOfNearestHost(state.list);
+  if (!found) return;
+  const handler = findSelectHandlerFiber(found.fiber);
+  if (!handler || handler.fn.__tulbeltObserveWrap) return;
+  const { fiber, key, fn } = handler;
+  const editor = state.editor;
+  const wrapped = function (...args) {
+    logAt(
+      LOG.observe,
+      capturePhase ? 'capture:onSelection' : '[baseline:onSelection]',
+      {
+        argCount: args.length,
+        payload: args.length === 1 ? sanitizeSelectionPayload(args[0]) : sanitizeForExport(args),
+        controller: captureControllerContext(editor),
+      },
+    );
+    return fn.apply(this, args);
+  };
+  wrapped.__tulbeltObserveWrap = true;
+  try {
+    fiber.memoizedProps[key] = wrapped;
+    state.selectWrap = { fiber, key, orig: fn };
+  } catch (_) {}
+}
+
+function unwrapObserveSelectHandler(state) {
+  const w = state.selectWrap;
+  if (!w) return;
+  try {
+    if (w.fiber.memoizedProps[w.key] === w.orig || w.fiber.memoizedProps[w.key]?.__tulbeltObserveWrap) {
+      w.fiber.memoizedProps[w.key] = w.orig;
+    }
+  } catch (_) {}
+  state.selectWrap = null;
 }
 
 // Minimal diff: where text changed, what was removed/inserted.
@@ -1175,71 +2327,119 @@ function diffAround(before, after) {
   };
 }
 
-function logObserveState(state, reason) {
+/** Same shape as capturePendingSelection — usable without fuzzy attach state. */
+function captureEditorPending(editor) {
+  const range = editor ? getCurrentRange(editor) : null;
+  const ctrl = editor ? findController(editor) : null;
+  return {
+    filterQuery: range?.query ?? '',
+    tokenStart: typeof range?.start === 'number' ? range.start : null,
+    tokenEnd: typeof range?.end === 'number' ? range.end : null,
+    tokenCaret: typeof range?.caret === 'number' ? range.caret : null,
+    selection: ctrl ? getControllerSelectionRange(ctrl) : null,
+    controllerCursor: ctrl ? readControllerCursor(ctrl) : null,
+  };
+}
+
+function snapshotListDom(list) {
+  if (!list) return null;
+  return {
+    nativeRowCount: list.querySelectorAll(NATIVE_ROW_SEL).length,
+    listHidden: list.getAttribute(HIDE_REACT_LIST_ATTR) === 'true',
+    connected: list.isConnected,
+  };
+}
+
+/** Indexes Tulip would receive from onSelection for the current token (fuzzy path). */
+function captureIndexPreview(editor, pending) {
+  const ctrl = editor ? findController(editor) : null;
+  if (!ctrl || !pending) return null;
+  const mapped = resolveFuzzyControllerIndexes(editor, ctrl, pending);
+  if (mapped.indexes) {
+    return { indexes: mapped.indexes, source: mapped.source };
+  }
+  return mapped.source ? { source: mapped.source } : null;
+}
+
+// Shared capture:edit / capture:attach payload — mirrors plugin token + index logic.
+function buildObserveCapturePayload(state, range) {
   const master = readArrayFrom(state.masterSource);
-  const indexed = readArrayFrom(state.indexedSource);
-  const range = getCurrentRange(state.editor);
-  const indexedTypes = indexed
-    ? [
-        ...new Set(
-          indexed
-            .map((it) => (it && typeof it === 'object' ? it.type : null))
-            .filter(Boolean),
-        ),
-      ]
-    : null;
-  // The authoritative "what Tulip is currently showing" signal: rows it
-  // has actually mounted in the DOM. Their types tell us the per-context
-  // category rule (field vs function vs …) without us having to find
-  // Tulip's filter array in state.
-  const visible = readVisibleRowItems(state.list);
-  const visibleTypes = visible.length
-    ? [...new Set(visible.map((it) => it?.type).filter(Boolean))]
-    : null;
-  log(`[observe:${reason}]`, {
+  const pending = captureEditorPending(state.editor);
+  return {
     text: range.text,
     query: range.query,
-    range: { start: range.start, end: range.end },
+    range: { start: range.start, end: range.end, caret: range.caret },
+    pending,
+    controller: captureControllerContext(state.editor),
+    listDom: snapshotListDom(state.list),
     master: master ? { len: master.length, sample0: master[0] } : null,
-    indexed: indexed
-      ? {
-          len: indexed.length,
-          types: indexedTypes,
-          sample0: indexed[0],
-          all: indexed.length <= 20 ? indexed : undefined,
-        }
-      : null,
-    visible: visible.length
-      ? { len: visible.length, types: visibleTypes, items: visible }
-      : null,
+  };
+}
+
+function logObserveState(state, reason) {
+  const range = getCurrentRange(state.editor);
+  const observeTag = capturePhase ? `capture:${reason}` : `observe:${reason}`;
+  logAt(LOG.observe, `[${observeTag}]`, buildObserveCapturePayload(state, range));
+}
+
+function scheduleCaptureRenderLog(state, range, query) {
+  if (capturePhase !== 'enhanced') return;
+  if (state._renderLogScheduled) return;
+  state._renderLogScheduled = true;
+  requestAnimationFrame(() => {
+    state._renderLogScheduled = false;
+    const pending = capturePendingSelection(state);
+    logAt(LOG.select, 'capture:render', {
+      query,
+      filteredLen: state.filtered?.length ?? 0,
+      selectedIndex: state.selectedIndex,
+      selectedLabel:
+        state.filtered?.[state.selectedIndex] != null
+          ? getLabel(state.filtered[state.selectedIndex])
+          : null,
+      pending,
+      indexPreview: captureIndexPreview(state.editor, pending),
+      range: { start: range.start, end: range.end, caret: range.caret },
+    });
   });
 }
 
+function observeAttachmentLive(popper, state) {
+  if (!state) return false;
+  const editor = popper.querySelector(EDITOR_SEL);
+  const list = popper.querySelector(LIST_SEL);
+  return !!(editor && list && state.editor === editor && state.list === list);
+}
+
 function attachObservePopper(popper) {
-  if (observePoppers.has(popper)) return;
+  if (observePoppers.has(popper)) {
+    const existing = observePoppers.get(popper);
+    if (observeAttachmentLive(popper, existing)) {
+      wrapObserveSelectHandler(existing);
+      return;
+    }
+    detachObservePopper(popper);
+  }
   const editor = popper.querySelector(EDITOR_SEL);
   if (!editor) return;
   const list = popper.querySelector(LIST_SEL);
   if (!list) return;
   const found = fiberOfNearestHost(list);
   if (!found) {
-    log('[observe] no fiber on list — cannot attach', popper);
+    logAt(LOG.observe, '[observe] no fiber on list — cannot attach', domDescriptor(popper));
     return;
   }
   const lists = findLists(found.fiber);
   if (!lists.master) {
-    log('[observe] no master list — cannot attach', popper);
+    logAt(LOG.observe, '[observe] no master list — cannot attach', domDescriptor(popper));
     return;
   }
-  log(
+  logAt(
+    LOG.observe,
     '[observe] attached. master:',
     `${lists.master.key.kind}.${lists.master.key.name}`,
     'len',
     lists.master.list.length,
-    'indexed:',
-    lists.indexed
-      ? `${lists.indexed.key.kind}.${lists.indexed.key.name} len ${lists.indexed.list.length}`
-      : '(none)',
   );
 
   const state = {
@@ -1247,7 +2447,6 @@ function attachObservePopper(popper) {
     editor,
     list,
     masterSource: lists.master,
-    indexedSource: lists.indexed,
   };
 
   // Coalesce bursts of mutations (Tulip can fire 3-5 per keystroke between
@@ -1264,34 +2463,73 @@ function attachObservePopper(popper) {
   obs.observe(editor, { childList: true, subtree: true, characterData: true });
   state.obs = obs;
 
+  wrapObserveSelectHandler(state);
+
   // Capture-phase click listener — fires before React's synthetic handler
   // so we can snapshot the editor pre-insert, and on the next rAF we
   // snapshot post-insert to log the diff Tulip just made.
   const onClick = (e) => {
     const target = e.target instanceof Element ? e.target : null;
     if (!target) return;
-    const rowEl = target.closest(
-      '.ReactVirtualized__Grid__innerScrollContainer > div',
-    );
+    const rowEl = target.closest(NATIVE_ROW_SEL);
+    if (!rowEl) return;
     const before = snapshotEditorText(editor);
-    const item = findRowItemNear(target);
-    log('[observe:click]', {
-      row: rowEl?.textContent,
-      item,
-      'editor.before': before,
+    const rowText = (rowEl.textContent ?? '').trim();
+    const found = findRowItemNear(target);
+    let item = found?.item ?? null;
+    if (!item) item = findItemByRowLabel(state, rowText);
+    const master = readArrayFrom(state.masterSource);
+    const masterIdx = masterIndexInList(master, item ?? { value: rowText });
+    const clickTag = capturePhase ? 'capture:click' : '[baseline:click]';
+    logAt(LOG.observe, clickTag, {
+      rowText: rowText.slice(0, 120),
+      item: sanitizeSelectionPayload(item),
+      itemPropKey: found?.key ?? null,
+      masterIdx: masterIdx >= 0 ? masterIdx : null,
+      editorBefore: before,
+      controller: captureControllerContext(editor),
     });
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
         const after = snapshotEditorText(editor);
-        log('[observe:click→after]', {
-          'editor.after': after,
+        const afterTag = capturePhase ? 'capture:click→after' : '[baseline:click→after]';
+        logAt(LOG.observe, afterTag, {
+          editorAfter: after,
           delta: diffAround(before, after),
+          controller: captureControllerContext(editor),
         });
       });
     });
   };
   list.addEventListener('click', onClick, true);
   state.onClick = onClick;
+
+  // Enter/Tab/arrow picks on the native list often skip click — mirror capture:click→after.
+  const onEditorKeyDown = (e) => {
+    if (e.key !== 'Enter' && e.key !== 'Tab' && e.key !== 'ArrowUp' && e.key !== 'ArrowDown') {
+      return;
+    }
+    const keyTag = capturePhase ? 'capture:keydown' : '[baseline:keydown]';
+    logAt(LOG.observe, keyTag, {
+      key: e.key,
+      ...buildObserveCapturePayload(state, getCurrentRange(editor)),
+    });
+    if (e.key !== 'Enter' && e.key !== 'Tab') return;
+    const before = snapshotEditorText(editor);
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        const afterTag = capturePhase ? 'capture:keydown→after' : '[baseline:keydown→after]';
+        logAt(LOG.observe, afterTag, {
+          key: e.key,
+          editorAfter: snapshotEditorText(editor),
+          delta: diffAround(before, snapshotEditorText(editor)),
+          controller: captureControllerContext(editor),
+        });
+      });
+    });
+  };
+  editor.addEventListener('keydown', onEditorKeyDown, true);
+  state.onEditorKeyDown = onEditorKeyDown;
 
   observePoppers.set(popper, state);
   logObserveState(state, 'attach');
@@ -1300,9 +2538,13 @@ function attachObservePopper(popper) {
 function detachObservePopper(popper) {
   const s = observePoppers.get(popper);
   if (!s) return;
+  unwrapObserveSelectHandler(s);
   s.obs?.disconnect();
   if (s.onClick && s.list) {
     s.list.removeEventListener('click', s.onClick, true);
+  }
+  if (s.onEditorKeyDown && s.editor) {
+    s.editor.removeEventListener('keydown', s.onEditorKeyDown, true);
   }
   observePoppers.delete(popper);
 }
@@ -1317,15 +2559,105 @@ function applyObserving(next) {
   const value = !!next;
   if (value === observing) return;
   observing = value;
+  if (!observing && capturePhase) {
+    capturePhase = null;
+    setLogLevel(LOG.off);
+  }
+  syncSessionRecording();
   if (observing) {
-    log('observe: starting');
+    logAt(LOG.observe, 'observe: starting');
     startObserver();
     requestScan();
   } else {
-    log('observe: stopping');
+    logAt(LOG.observe, 'observe: stopping');
     detachAllObserve();
     if (!enabled) stopObserver();
   }
+}
+
+function resolveCapturePhase(phase) {
+  if (phase === 'baseline' || phase === 'enhanced') return phase;
+  return enabled ? 'enhanced' : 'baseline';
+}
+
+function startCapture(phase) {
+  capturePhase = phase;
+  clearSessionLog();
+  sessionRecording = true;
+  if (!observing) applyObserving(true);
+  if (phase === 'baseline') {
+    setLogLevel(LOG.observe);
+    if (enabled) {
+      logAt(
+        LOG.observe,
+        '[capture] warning: fuzzy is ON — turn OFF in Tulbelt for a native baseline',
+      );
+    }
+    logAt(
+      LOG.observe,
+      '[capture] baseline — use Tulip native list (not overlay), then copyLog()',
+    );
+    return 'capture:baseline active (fuzzy OFF recommended)';
+  }
+  setLogLevel(LOG.select);
+  if (!enabled) {
+    logAt(LOG.select, '[capture] warning: fuzzy is OFF — turn ON in Tulbelt for enhanced');
+  }
+  logAt(LOG.select, '[capture] enhanced — use overlay / Enter, then copyLog()');
+  return 'capture:enhanced active (fuzzy ON required)';
+}
+
+function stopCapture() {
+  const was = capturePhase;
+  capturePhase = null;
+  applyObserving(false);
+  setLogLevel(LOG.off);
+  return was ? `capture:${was} stopped` : 'capture stopped (was inactive)';
+}
+
+/** Unified A/B capture — same commands for native vs overlay. */
+function capture(phase) {
+  if (phase === false || phase === 'stop' || phase === 'off') return stopCapture();
+  if (phase === undefined && capturePhase) return stopCapture();
+  const next = resolveCapturePhase(phase);
+  if (capturePhase === next) return stopCapture();
+  if (capturePhase) stopCapture();
+  return startCapture(next);
+}
+
+function exportComparison() {
+  return sanitizeForExport({
+    exportedAt: new Date().toISOString(),
+    baseline: debugApi.lastBaselineExport,
+    enhanced: debugApi.lastEnhancedExport,
+  });
+}
+
+function copyComparison() {
+  const payload = exportComparison();
+  let text;
+  try {
+    text = safeJsonStringify(payload);
+  } catch (e) {
+    text = JSON.stringify({ error: 'copyComparison failed', message: String(e?.message || e) });
+  }
+  debugApi.lastComparison = payload;
+  debugApi.lastComparisonJson = text;
+  if (typeof copy === 'function') {
+    try {
+      copy(text);
+      console.log('[tulbelt:fuzzy:main] copied baseline+enhanced comparison to clipboard');
+      return payload;
+    } catch (_) {}
+  }
+  if (navigator.clipboard?.writeText) {
+    return navigator.clipboard.writeText(text).then(() => {
+      console.log('[tulbelt:fuzzy:main] copied baseline+enhanced comparison to clipboard');
+      return payload;
+    });
+  }
+  console.log('[tulbelt:fuzzy:main] copy(__tulbeltFuzzy.lastComparisonJson)');
+  return payload;
 }
 
 function applyEnabled(next) {
@@ -1358,38 +2690,93 @@ attrObserver.observe(document.documentElement, {
   attributeFilter: [ATTR],
 });
 
-// Devtools API — accessible from the page's main world, so the regular
-// console (no context switch needed) can poke at it.
+function findAttachedFuzzyState() {
+  for (const popper of document.querySelectorAll(POPPER_SEL)) {
+    const s = popperState.get(popper);
+    if (s) return s;
+  }
+  return null;
+}
+
+// Structured snapshot for agents — paste console output or assign to a var.
+function buildReport() {
+  const editor = document.querySelector(EDITOR_SEL);
+  const domRange = editor ? getCurrentRange(editor) : null;
+  const attached = findAttachedFuzzyState();
+  const ctrl = editor ? findController(editor) : null;
+  return {
+    enabled,
+    debug: logLevelName(),
+    observing,
+    editorText: editor ? snapshotEditorText(editor) : null,
+    filterQuery: domRange?.query ?? null,
+    tokenRange: domRange
+      ? { start: domRange.start, end: domRange.end, caret: domRange.caret }
+      : null,
+    controllerSelection: ctrl ? getControllerSelectionRange(ctrl) : null,
+    attached: attached
+      ? {
+          filteredLen: attached.filtered?.length ?? 0,
+          selectedIndex: attached.selectedIndex,
+          masterLen: attached.masterList?.length ?? 0,
+        }
+      : null,
+  };
+}
+
+// Devtools API — page main world (`window.__tulbeltFuzzy`).
 const debugApi = {
   enabled: () => enabled,
   observing: () => observing,
-  traceSelect: (next) => {
-    if (next === undefined) {
-      traceSelect = !traceSelect;
-    } else {
-      traceSelect = !!next;
-    }
-    log('traceSelect =', traceSelect);
-    return traceSelect;
+  /** Full session: { entries, state, … } — assign or JSON.stringify for agents */
+  exportLog,
+  /** JSON to clipboard when possible; same object on .lastExport */
+  copyLog,
+  clearLog: clearSessionLog,
+  /** Force recording on/off (default on when debug≥select or observe) */
+  record: (on) => {
+    if (on === undefined) return sessionRecording;
+    sessionRecording = !!on;
+    if (sessionRecording) clearSessionLog();
+    return sessionRecording;
   },
-  // Session-only fuzzy toggle. Storage / popup toggles still win the next
-  // time they fire, but for the rest of this page lifetime this overrides
-  // them without round-tripping through chrome.storage.
+  lastExport: null,
+  /** Pre-stringified session log — safe to copy() directly */
+  lastExportJson: null,
+  debug: (level) => setLogLevel(level),
+  // Alias: __tulbeltFuzzy.debug('select') — logs each insert + before/after diff
+  traceSelect: (next) => {
+    if (next === undefined) return setLogLevel(logLevel >= LOG.select ? LOG.off : LOG.select);
+    return setLogLevel(next ? LOG.select : LOG.off);
+  },
   setEnabled: (next) => applyEnabled(!!next),
-  // Toggle the passive shadow logger. Works whether fuzzy is on or off.
-  // Pass nothing to flip, pass a bool to set.
   observe: (next) => applyObserving(next === undefined ? !observing : !!next),
-  // One-shot dump of current popper state. Tries the observe attachment
-  // first, falls back to fuzzy. Returns nothing — output is in the log.
+  /**
+   * Unified capture for native (baseline) vs overlay (enhanced).
+   * capture() / capture('baseline'|'enhanced') / capture(false)
+   */
+  capture,
+  captureActive: () => !!capturePhase,
+  capturePhase: () => capturePhase,
+  exportComparison,
+  copyComparison,
+  lastBaselineExport: null,
+  lastBaselineJson: null,
+  lastEnhancedExport: null,
+  lastEnhancedJson: null,
+  lastComparison: null,
+  lastComparisonJson: null,
+  /** @deprecated use capture('baseline') or capture() with fuzzy off */
+  baseline: (on) => capture(on === false ? false : 'baseline'),
+  /** @deprecated use capture('enhanced') or capture() with fuzzy on */
+  enhanced: (on) => capture(on === false ? false : 'enhanced'),
+  baselineActive: () => capturePhase === 'baseline',
+  enhancedActive: () => capturePhase === 'enhanced',
+  report: () => buildReport(),
   snapshot: () => {
-    for (const popper of document.querySelectorAll(POPPER_SEL)) {
-      const s = observePoppers.get(popper) || popperState.get(popper);
-      if (s) {
-        logObserveState(s, 'snapshot');
-        return;
-      }
-    }
-    log('snapshot: no active popper');
+    const r = buildReport();
+    console.log('[tulbelt:fuzzy:main] report', r);
+    return r;
   },
   scan: () => scanAll(),
   popper: () => document.querySelector(POPPER_SEL),
@@ -1401,10 +2788,6 @@ const debugApi = {
     const f = fiberOf(node ?? document.querySelector(LIST_SEL));
     return f ? findLists(f) : null;
   },
-  // Dump EVERY options-shaped array we can find on/near the list's fiber
-  // chain, with its source key and a sample. Use this to hunt down where
-  // Tulip stashes its filtered list — you'll spot it as the array whose
-  // length matches what the popup is currently showing.
   dumpArrays: (node) => {
     const f = fiberOf(node ?? document.querySelector(LIST_SEL));
     if (!f) return null;
@@ -1417,40 +2800,50 @@ const debugApi = {
         entry.fiber.type?.name ||
         String(entry.fiber.type).slice(0, 30),
       sample: entry.list[0],
-      hasIndexes: arrayHasIndexes(entry.list),
     };
     return {
       master: summarize(result.master),
-      indexed: summarize(result.indexed),
       all: result.all.map(summarize),
     };
   },
-  visible: () => readVisibleRowItems(document.querySelector(LIST_SEL)),
+  listDom: () => snapshotListDom(document.querySelector(LIST_SEL)),
   findSelect: (node) => {
     const f = fiberOf(node ?? document.querySelector(LIST_SEL));
-    return f ? findSelectHandler(f) : null;
+    return f ? findSelectHandler(f, true) : null;
   },
   range: () => {
     const ed = document.querySelector(EDITOR_SEL);
     return ed ? getCurrentRange(ed) : null;
   },
-  // Inspect the live state attached to the (single) currently-active popper.
-  state: () => {
-    for (const popper of document.querySelectorAll(POPPER_SEL)) {
-      const s = popperState.get(popper);
-      if (s) {
-        return {
-          masterLen: s.masterList?.length ?? 0,
-          masterSrc: s.masterSource?.key,
-          indexedLen: s.indexedList?.length ?? 0,
-          indexedSrc: s.indexedSource?.key,
-          indexedSample: s.indexedList?.[0],
-          range: s.currentRange,
-          filteredLen: s.filtered?.length ?? 0,
-        };
+  selection: () => {
+    const ed = document.querySelector(EDITOR_SEL);
+    const ctrl = ed ? findController(ed) : null;
+    return ctrl ? getControllerSelectionRange(ctrl) : null;
+  },
+  controllerMethods: () => {
+    const ed = document.querySelector(EDITOR_SEL);
+    const ctrl = ed ? findController(ed) : null;
+    if (!ctrl) return [];
+    const names = new Set();
+    for (let o = ctrl; o && o !== Object.prototype; o = Object.getPrototypeOf(o)) {
+      for (const k of Object.getOwnPropertyNames(o)) {
+        if (typeof o[k] === 'function') names.add(k);
       }
     }
-    return null;
+    return [...names].sort();
+  },
+  state: () => {
+    const s = findAttachedFuzzyState();
+    if (!s) return null;
+    const ctrl = findController(s.editor);
+    return {
+      masterLen: s.masterList?.length ?? 0,
+      masterSrc: s.masterSource?.key,
+      filterQuery: s.currentRange?.query,
+      controllerSelection: ctrl ? getControllerSelectionRange(ctrl) : null,
+      filteredLen: s.filtered?.length ?? 0,
+      selectedIndex: s.selectedIndex,
+    };
   },
 };
 

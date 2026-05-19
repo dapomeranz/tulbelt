@@ -1,7 +1,6 @@
-// Hides locked/read-only trigger rows in the app editor's trigger list.
-// View-only rows carry the `view-only` class on the same element that holds
-// the generated `…--triggerRowStyles` class; regular trigger rows have only
-// the generated class. A single CSS rule covers it — no DOM scan needed.
+// Hides base-layout trigger rows in the app editor's trigger list.
+// Inherited layout triggers are view-only (lock icon, no row actions). App
+// triggers can also be view-only but expose copy/view buttons — keep those.
 
 (() => {
 const FEATURE_ID = 'hide-view-only-triggers';
@@ -15,7 +14,7 @@ function ensureStyles() {
   const style = document.createElement('style');
   style.id = STYLE_ID;
   style.textContent =
-    `[class*="triggerRowStyles"].view-only { display: none !important; }`;
+    `[class*="triggerRowStyles"].view-only:not(:has([data-testid^="view-trigger-"])) { display: none !important; }`;
   (document.head || document.documentElement).appendChild(style);
 }
 

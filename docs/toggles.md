@@ -73,10 +73,11 @@ comments, Process cycle time, and App comments.
 Suppresses the tooltip pop-ups on hover-only action buttons (cut, copy, etc.)
 while leaving toolbar button tooltips intact.
 
-### Hide view-only triggers — `hide-view-only-triggers` · **default: off**
+### Hide base layout triggers — `hide-view-only-triggers` · **default: off**
 
-In the trigger editor, hides locked/read-only triggers so only editable ones
-remain in the list.
+In the trigger editor, hides inherited base-layout triggers (lock icon, no
+copy/view row actions). Other view-only triggers with copy/view buttons stay
+visible.
 
 ### Move variables to toolbar — `move-variables-to-toolbar` · **default: off**
 
