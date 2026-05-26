@@ -1,72 +1,68 @@
 // In the trigger editor variable picker, nested Object fields are grouped
-// under a disabled <li> header that appears ABOVE its children in the
-// virtualised list. Selectable nested fields are indented with a leading
-// &nbsp;&nbsp; span.
+// under a disabled <li> header. After selecting a nested field, only the
+// leaf name is shown in the trigger button display. This toggle rewrites
+// the display to show "ObjectName → FieldName".
 //
-// This toggle intercepts clicks on nested field buttons, finds the nearest
-// disabled group-header <li> ABOVE the clicked row (by comparing absolute
-// `top` values in the virtualised list), and rewrites the selected-value
-// display to show "ObjectName → FieldName".
-//
-// The page has two scroll containers matching the overflow/will-change style;
-// we target the one that contains <li> elements (the variable picker), not
-// the one that contains tree-item divs (the step list).
+// The dropdown is rendered in a portal — it is not a DOM descendant of the
+// trigger button that opened it. So we track which trigger button was most
+// recently clicked ("lastTriggerBtn"), then patch that specific button after
+// a nested field is selected.
 
 (() => {
 const FEATURE_ID = 'variable-full-path';
 const STORAGE_KEY = 'toggles';
 const STASH_ATTR = 'data-tulbelt-vfp-original';
-const STASH_ARIA_ATTR = 'data-tulbelt-vfp-original-aria';
 const PATCHED_ATTR = 'data-tulbelt-vfp-patched';
 
+// The button that opens the dropdown. Multiple exist on the page; we track
+// whichever was clicked most recently.
+const TRIGGER_BTN_LABEL = 'Select new variable or array';
 const SCROLL_CONTAINER_SELECTOR = '[style*="overflow: auto"][style*="will-change: transform"]';
 
 let enabled = false;
 let attached = false;
+let lastTriggerBtn = null; // the button that opened the current dropdown
 
 // ---------------------------------------------------------------------------
-// Find the variable-picker scroll container (has <li> children, not tree-items)
+// Find the variable-picker scroll container (has <li> children)
 // ---------------------------------------------------------------------------
 function findVariableContainer() {
-  const all = document.querySelectorAll(SCROLL_CONTAINER_SELECTOR);
-  for (const sc of all) {
+  for (const sc of document.querySelectorAll(SCROLL_CONTAINER_SELECTOR)) {
     if (sc.querySelector('li')) return sc;
   }
   return null;
 }
 
 // ---------------------------------------------------------------------------
-// Helpers
+// Is this <li> a nested (indented) item?
+// Tulip uses a leading <span> with &nbsp; chars for indent.
 // ---------------------------------------------------------------------------
-
-// A nested (indented) item has a first <span> inside the button whose text
-// is only whitespace / non-breaking spaces.
 function isIndented(li) {
   const firstSpan = li.querySelector('button > span:first-child');
   if (!firstSpan) return false;
-  const t = firstSpan.textContent;
-  return t.length > 0 && /^[\s\u00a0]+$/.test(t);
+  return firstSpan.textContent.length > 0 && /^[\s\u00a0]+$/.test(firstSpan.textContent);
 }
 
-// Given a clicked nested-field <li>, find the nearest disabled group-header
-// <li> that appears ABOVE it in the virtualised list (highest top < clickedTop).
+// ---------------------------------------------------------------------------
+// Find the nearest disabled group-header <li> ABOVE the clicked row.
+// Headers have a lower `top` value than their children.
+// ---------------------------------------------------------------------------
 function findGroupHeader(clickedLi, scrollContainer) {
   const clickedRow = clickedLi.parentElement;
   const clickedTop = parseInt(clickedRow?.style?.top ?? '-1', 10);
   if (clickedTop < 0) return null;
 
-  const rowsParent = scrollContainer.firstElementChild || scrollContainer;
-  const rows = rowsParent.querySelectorAll(':scope > div[style*="position: absolute"]');
+  const rows = scrollContainer.firstElementChild
+    ?.querySelectorAll(':scope > div[style*="position: absolute"]') || [];
 
   let bestTop = -1;
   let bestHeader = null;
 
   for (const row of rows) {
     const top = parseInt(row.style.top ?? '-1', 10);
-    if (top < 0 || top >= clickedTop) continue; // only look above clicked item
+    if (top < 0 || top >= clickedTop) continue;
     const li = row.querySelector('li');
-    if (!li) continue;
-    if (li.hasAttribute('disabled') && top > bestTop) {
+    if (li?.hasAttribute('disabled') && top > bestTop) {
       bestTop = top;
       bestHeader = li;
     }
@@ -77,38 +73,20 @@ function findGroupHeader(clickedLi, scrollContainer) {
 
 function headerLabel(li) {
   const btn = li.querySelector('button');
-  return btn?.getAttribute('aria-label') || btn?.getAttribute('data-testid') || btn?.textContent?.trim() || null;
+  return btn?.getAttribute('aria-label') || btn?.getAttribute('data-testid') || null;
 }
 
 function fieldLabel(btn) {
-  return btn.getAttribute('aria-label') || btn.getAttribute('data-testid') || btn.textContent?.trim() || null;
+  return btn.getAttribute('aria-label') || btn.getAttribute('data-testid') || null;
 }
 
 // ---------------------------------------------------------------------------
-// Find the selected-value display button to patch.
-// It's the button that opened the dropdown — sits outside the scroll container
-// with data-istarget="true" and is not disabled.
+// Patch the trigger button that opened the dropdown
 // ---------------------------------------------------------------------------
-function findDisplayButton(scrollContainer) {
-  let node = scrollContainer.parentElement;
-  for (let i = 0; i < 12 && node; i++) {
-    const candidates = node.querySelectorAll('button[data-istarget="true"]:not([disabled])');
-    for (const c of candidates) {
-      if (!scrollContainer.contains(c)) return c;
-    }
-    node = node.parentElement;
-  }
-  // Fallback: the button that opened the dropdown
-  return document.querySelector('button[aria-label="Select new variable or array"]')
-    || document.querySelector('button[data-istarget="true"]:not([disabled])');
-}
-
-// ---------------------------------------------------------------------------
-// Patch / restore
-// ---------------------------------------------------------------------------
-function patchDisplay(displayBtn, path) {
-  const labelSpan = displayBtn.querySelector('span[title]');
-  const target = labelSpan || displayBtn;
+function patchButton(btn, path) {
+  if (!btn) return;
+  const labelSpan = btn.querySelector('span[title]');
+  const target = labelSpan || btn;
   if (target.getAttribute(PATCHED_ATTR) === path) return;
   if (!target.hasAttribute(STASH_ATTR)) {
     target.setAttribute(STASH_ATTR, target.textContent);
@@ -116,12 +94,6 @@ function patchDisplay(displayBtn, path) {
   target.setAttribute(PATCHED_ATTR, path);
   target.textContent = path;
   if (target.hasAttribute('title')) target.setAttribute('title', path);
-  if (displayBtn !== target && displayBtn.hasAttribute('aria-label')) {
-    if (!displayBtn.hasAttribute(STASH_ARIA_ATTR)) {
-      displayBtn.setAttribute(STASH_ARIA_ATTR, displayBtn.getAttribute('aria-label'));
-    }
-    displayBtn.setAttribute('aria-label', path);
-  }
 }
 
 function restoreAll() {
@@ -131,23 +103,27 @@ function restoreAll() {
     el.removeAttribute(STASH_ATTR);
     el.removeAttribute(PATCHED_ATTR);
   }
-  for (const el of document.querySelectorAll(`[${STASH_ARIA_ATTR}]`)) {
-    el.setAttribute('aria-label', el.getAttribute(STASH_ARIA_ATTR));
-    el.removeAttribute(STASH_ARIA_ATTR);
-  }
 }
 
 // ---------------------------------------------------------------------------
-// Click handler
+// Click handler — capture phase so we see all clicks
 // ---------------------------------------------------------------------------
 function handleClick(e) {
   if (!enabled) return;
 
+  // Track which trigger button was clicked to open the dropdown
+  const triggerBtn = e.target.closest(`button[aria-label="${TRIGGER_BTN_LABEL}"]`);
+  if (triggerBtn) {
+    lastTriggerBtn = triggerBtn;
+    return;
+  }
+
+  // Check if a nested field was clicked inside the variable picker
   const btn = e.target.closest('button[data-istarget="true"]:not([disabled])');
   if (!btn) return;
 
   const li = btn.closest('li');
-  if (!li || !isIndented(li)) return; // not a nested field
+  if (!li || !isIndented(li)) return;
 
   const scrollContainer = findVariableContainer();
   if (!scrollContainer || !scrollContainer.contains(li)) return;
@@ -160,13 +136,10 @@ function handleClick(e) {
   if (!objName || !fname) return;
 
   const path = `${objName} → ${fname}`;
-  console.log('[tulbelt vfp] path:', path);
+  const targetBtn = lastTriggerBtn;
 
-  // Wait a tick for Tulip to update the display after the click
   setTimeout(() => {
-    const display = findDisplayButton(scrollContainer);
-    console.log('[tulbelt vfp] display:', !!display, display?.getAttribute('aria-label'));
-    if (display) patchDisplay(display, path);
+    if (targetBtn) patchButton(targetBtn, path);
   }, 80);
 }
 
@@ -183,6 +156,7 @@ function stopObserver() {
   if (!attached) return;
   document.removeEventListener('click', handleClick, true);
   attached = false;
+  lastTriggerBtn = null;
 }
 
 // ---------------------------------------------------------------------------
