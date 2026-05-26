@@ -49,25 +49,27 @@ function ensureStyles() {
       display: inline-flex;
       align-items: center;
       gap: 6px;
-      padding: 4px 10px;
-      margin: 0 6px;
-      border: 1px solid #c0c7d0;
+      padding: 6px 12px;
+      margin: 0 8px;
+      border: 1px solid #1c69e1;
       border-radius: 4px;
-      background: #fff;
-      color: #3a4552;
+      background: #1c69e1;
+      color: #fff;
       font-size: 12px;
+      font-weight: 500;
       font-family: inherit;
       cursor: pointer;
       line-height: 1.4;
+      white-space: nowrap;
     }
-    #${BTN_ID}:hover { background: #f4f6f8; }
+    #${BTN_ID}:hover { background: #1556b8; border-color: #1556b8; }
     #${BTN_ID}:disabled { opacity: 0.6; cursor: progress; }
     #${STATUS_ID} {
       display: inline-block;
       margin-left: 4px;
       padding: 2px 6px;
       border-radius: 10px;
-      background: #2563eb;
+      background: rgba(255,255,255,0.25);
       color: #fff;
       font-size: 11px;
       font-weight: 600;
@@ -279,10 +281,10 @@ function findToolbarAnchor() {
   // Prefer the trigger editor (modal) anchor if it's open
   const editor = document.querySelector(TRIGGER_EDITOR_SELECTOR);
   if (editor) {
-    const anchor = editor.querySelector(TRIGGER_EDITOR_ANCHOR);
-    if (anchor) {
-      // Use the anchor's wrapping div as the insertion point
-      return anchor.closest('[data-istarget="true"]') || anchor;
+    const copyBtn = editor.querySelector(TRIGGER_EDITOR_ANCHOR);
+    if (copyBtn) {
+      // Return the copy-link button's wrapper so we can insert as a sibling
+      return copyBtn.closest('[data-istarget="true"]') || copyBtn;
     }
   }
   // Fallback to the main app editor toolbar
