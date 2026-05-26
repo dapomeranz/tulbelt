@@ -22,9 +22,13 @@ const SCROLL_CONTAINER_SELECTOR = '[style*="overflow: auto"][style*="will-change
 const STASH_ATTR = 'data-tulbelt-vfp-original';
 const PATCHED_ATTR = 'data-tulbelt-vfp-patched';
 
-// Anchor selectors copied from move-variables-to-toolbar.js — these are the
-// stable IDs Tulip uses for the app editor toolbar controls.
-const TOOLBAR_ANCHOR_SELECTORS = [
+// Anchor selectors for the trigger editor modal. The "Copy link to trigger"
+// button sits at the top-right of the trigger editor, next to the title; it's
+// the most stable insertion point. Falls back to the app editor toolbar
+// (snapshot/translation) if the trigger editor isn't open.
+const TRIGGER_EDITOR_SELECTOR = '[data-testid="trigger-editor"]';
+const TRIGGER_EDITOR_ANCHOR = 'button[aria-label="Copy link to trigger"]';
+const APP_EDITOR_ANCHOR_SELECTORS = [
   '#app-editor-translation',
   '#app-editor-snapshot',
 ];
@@ -272,7 +276,17 @@ async function runExpand() {
 // Insert / remove toolbar button
 // ---------------------------------------------------------------------------
 function findToolbarAnchor() {
-  for (const sel of TOOLBAR_ANCHOR_SELECTORS) {
+  // Prefer the trigger editor (modal) anchor if it's open
+  const editor = document.querySelector(TRIGGER_EDITOR_SELECTOR);
+  if (editor) {
+    const anchor = editor.querySelector(TRIGGER_EDITOR_ANCHOR);
+    if (anchor) {
+      // Use the anchor's wrapping div as the insertion point
+      return anchor.closest('[data-istarget="true"]') || anchor;
+    }
+  }
+  // Fallback to the main app editor toolbar
+  for (const sel of APP_EDITOR_ANCHOR_SELECTORS) {
     const el = document.querySelector(sel);
     if (el) return el;
   }
@@ -317,7 +331,13 @@ function removeButton() {
 // ---------------------------------------------------------------------------
 function onMutation() {
   if (!enabled) return;
-  if (!document.getElementById(BTN_ID) && findToolbarAnchor()) {
+  const existing = document.getElementById(BTN_ID);
+  const anchor = findToolbarAnchor();
+  if (!existing && anchor) {
+    insertButton();
+  } else if (existing && !document.body.contains(existing)) {
+    // Already gone; observer will pick it up next mutation
+  } else if (existing && anchor && !existing.parentElement) {
     insertButton();
   }
 }
