@@ -55,8 +55,7 @@ function findGroupHeader(clickedLi, scrollContainer) {
   const clickedTop = parseInt(clickedRow?.style?.top ?? '-1', 10);
   if (clickedTop < 0) return null;
 
-  const outer = scrollContainer.querySelector(':scope > div');
-  const rowsParent = outer || scrollContainer;
+  const rowsParent = scrollContainer.firstElementChild || scrollContainer;
   const rows = rowsParent.querySelectorAll(':scope > div[style*="position: absolute"]');
 
   let bestTop = -1;
@@ -92,14 +91,16 @@ function fieldLabel(btn) {
 // ---------------------------------------------------------------------------
 function findDisplayButton(scrollContainer) {
   let node = scrollContainer.parentElement;
-  for (let i = 0; i < 10 && node; i++) {
+  for (let i = 0; i < 12 && node; i++) {
     const candidates = node.querySelectorAll('button[data-istarget="true"]:not([disabled])');
     for (const c of candidates) {
       if (!scrollContainer.contains(c)) return c;
     }
     node = node.parentElement;
   }
-  return null;
+  // Fallback: the button that opened the dropdown
+  return document.querySelector('button[aria-label="Select new variable or array"]')
+    || document.querySelector('button[data-istarget="true"]:not([disabled])');
 }
 
 // ---------------------------------------------------------------------------
@@ -159,10 +160,12 @@ function handleClick(e) {
   if (!objName || !fname) return;
 
   const path = `${objName} → ${fname}`;
+  console.log('[tulbelt vfp] path:', path);
 
   // Wait a tick for Tulip to update the display after the click
   setTimeout(() => {
     const display = findDisplayButton(scrollContainer);
+    console.log('[tulbelt vfp] display:', !!display, display?.getAttribute('aria-label'));
     if (display) patchDisplay(display, path);
   }, 80);
 }
