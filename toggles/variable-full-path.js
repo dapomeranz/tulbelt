@@ -1,17 +1,22 @@
 // In the trigger editor variable picker, nested Object fields are grouped
-// under a disabled <li> that acts as a group FOOTER (it appears below its
-// children in the virtualised list, not above). Selectable nested fields are
-// indented with a leading &nbsp;&nbsp; span.
+// under a disabled <li> header that appears ABOVE its children in the
+// virtualised list. Selectable nested fields are indented with a leading
+// &nbsp;&nbsp; span.
 //
 // This toggle intercepts clicks on nested field buttons, finds the nearest
-// disabled group-footer <li> below the clicked row (by comparing absolute
-// `top` values), and rewrites the selected-value display to show
-// "ObjectName → FieldName".
+// disabled group-header <li> ABOVE the clicked row (by comparing absolute
+// `top` values in the virtualised list), and rewrites the selected-value
+// display to show "ObjectName → FieldName".
+//
+// The page has two scroll containers matching the overflow/will-change style;
+// we target the one that contains <li> elements (the variable picker), not
+// the one that contains tree-item divs (the step list).
 
 (() => {
 const FEATURE_ID = 'variable-full-path';
 const STORAGE_KEY = 'toggles';
 const STASH_ATTR = 'data-tulbelt-vfp-original';
+const STASH_ARIA_ATTR = 'data-tulbelt-vfp-original-aria';
 const PATCHED_ATTR = 'data-tulbelt-vfp-patched';
 
 const SCROLL_CONTAINER_SELECTOR = '[style*="overflow: auto"][style*="will-change: transform"]';
@@ -20,10 +25,22 @@ let enabled = false;
 let attached = false;
 
 // ---------------------------------------------------------------------------
+// Find the variable-picker scroll container (has <li> children, not tree-items)
+// ---------------------------------------------------------------------------
+function findVariableContainer() {
+  const all = document.querySelectorAll(SCROLL_CONTAINER_SELECTOR);
+  for (const sc of all) {
+    if (sc.querySelector('li')) return sc;
+  }
+  return null;
+}
+
+// ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-// A nested (indented) item has a first <span> whose text is only whitespace/nbsp
+// A nested (indented) item has a first <span> inside the button whose text
+// is only whitespace / non-breaking spaces.
 function isIndented(li) {
   const firstSpan = li.querySelector('button > span:first-child');
   if (!firstSpan) return false;
@@ -31,39 +48,35 @@ function isIndented(li) {
   return t.length > 0 && /^[\s\u00a0]+$/.test(t);
 }
 
-// Given a clicked nested-field button, find the nearest disabled group-footer
-// <li> that appears BELOW it in the virtualised list (lowest top > clickedTop).
-function findGroupFooter(clickedLi) {
-  const scrollContainer = clickedLi.closest(SCROLL_CONTAINER_SELECTOR);
-  if (!scrollContainer) return null;
-
+// Given a clicked nested-field <li>, find the nearest disabled group-header
+// <li> that appears ABOVE it in the virtualised list (highest top < clickedTop).
+function findGroupHeader(clickedLi, scrollContainer) {
   const clickedRow = clickedLi.parentElement;
   const clickedTop = parseInt(clickedRow?.style?.top ?? '-1', 10);
   if (clickedTop < 0) return null;
 
-  // Find the inner div that holds all the absolutely-positioned rows
-  const inner = scrollContainer.querySelector(':scope > div > div');
-  const rowsParent = inner || scrollContainer;
+  const outer = scrollContainer.querySelector(':scope > div');
+  const rowsParent = outer || scrollContainer;
   const rows = rowsParent.querySelectorAll(':scope > div[style*="position: absolute"]');
 
-  let bestTop = Infinity;
-  let bestFooter = null;
+  let bestTop = -1;
+  let bestHeader = null;
 
   for (const row of rows) {
     const top = parseInt(row.style.top ?? '-1', 10);
-    if (top <= clickedTop) continue; // only look below the clicked item
+    if (top < 0 || top >= clickedTop) continue; // only look above clicked item
     const li = row.querySelector('li');
     if (!li) continue;
-    if (li.hasAttribute('disabled') && top < bestTop) {
+    if (li.hasAttribute('disabled') && top > bestTop) {
       bestTop = top;
-      bestFooter = li;
+      bestHeader = li;
     }
   }
 
-  return bestFooter;
+  return bestHeader;
 }
 
-function groupLabel(li) {
+function headerLabel(li) {
   const btn = li.querySelector('button');
   return btn?.getAttribute('aria-label') || btn?.getAttribute('data-testid') || btn?.textContent?.trim() || null;
 }
@@ -73,11 +86,9 @@ function fieldLabel(btn) {
 }
 
 // ---------------------------------------------------------------------------
-// Find the selected-value display element to patch.
-// The display button is the one that triggered the dropdown to open — it sits
-// outside the scroll container and shows the currently-selected value.
-// We walk up from the scroll container looking for a button[data-istarget]
-// that is NOT inside the scroll container.
+// Find the selected-value display button to patch.
+// It's the button that opened the dropdown — sits outside the scroll container
+// with data-istarget="true" and is not disabled.
 // ---------------------------------------------------------------------------
 function findDisplayButton(scrollContainer) {
   let node = scrollContainer.parentElement;
@@ -105,8 +116,8 @@ function patchDisplay(displayBtn, path) {
   target.textContent = path;
   if (target.hasAttribute('title')) target.setAttribute('title', path);
   if (displayBtn !== target && displayBtn.hasAttribute('aria-label')) {
-    if (!displayBtn.hasAttribute(STASH_ATTR)) {
-      displayBtn.setAttribute(STASH_ATTR + '-aria', displayBtn.getAttribute('aria-label'));
+    if (!displayBtn.hasAttribute(STASH_ARIA_ATTR)) {
+      displayBtn.setAttribute(STASH_ARIA_ATTR, displayBtn.getAttribute('aria-label'));
     }
     displayBtn.setAttribute('aria-label', path);
   }
@@ -119,9 +130,9 @@ function restoreAll() {
     el.removeAttribute(STASH_ATTR);
     el.removeAttribute(PATCHED_ATTR);
   }
-  for (const el of document.querySelectorAll(`[${STASH_ATTR}-aria]`)) {
-    el.setAttribute('aria-label', el.getAttribute(STASH_ATTR + '-aria'));
-    el.removeAttribute(STASH_ATTR + '-aria');
+  for (const el of document.querySelectorAll(`[${STASH_ARIA_ATTR}]`)) {
+    el.setAttribute('aria-label', el.getAttribute(STASH_ARIA_ATTR));
+    el.removeAttribute(STASH_ARIA_ATTR);
   }
 }
 
@@ -137,17 +148,17 @@ function handleClick(e) {
   const li = btn.closest('li');
   if (!li || !isIndented(li)) return; // not a nested field
 
-  const footer = findGroupFooter(li);
-  if (!footer) return;
+  const scrollContainer = findVariableContainer();
+  if (!scrollContainer || !scrollContainer.contains(li)) return;
 
-  const objName = groupLabel(footer);
+  const header = findGroupHeader(li, scrollContainer);
+  if (!header) return;
+
+  const objName = headerLabel(header);
   const fname = fieldLabel(btn);
   if (!objName || !fname) return;
 
   const path = `${objName} → ${fname}`;
-
-  const scrollContainer = li.closest(SCROLL_CONTAINER_SELECTOR);
-  if (!scrollContainer) return;
 
   // Wait a tick for Tulip to update the display after the click
   setTimeout(() => {
