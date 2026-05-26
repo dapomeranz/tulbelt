@@ -6,8 +6,7 @@
   "permissions": [
     "declarativeNetRequestWithHostAccess",
     "storage",
-    "webNavigation",
-    "tabs"
+    "webNavigation"
   ],
   "host_permissions": [
     "*://*.tulip.co/*"
