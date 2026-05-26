@@ -117,7 +117,7 @@ function patchButton(btn, path) {
     target.setAttribute(STASH_ATTR, target.textContent);
   }
   target.setAttribute(PATCHED_ATTR, path);
-  target.textContent = path; console.log("[vfp] patched", target.tagName, "->", path);
+  target.textContent = path;
 }
 
 function restoreAll() {
@@ -151,7 +151,6 @@ function handleClick(e) {
   if (!scrollContainer?.contains(li)) return;
 
   const path = buildPath(li, scrollContainer);
-  console.log('[vfp] indent:', indentLevel(li), '| path result:', path, '| lastTriggerBtn set:', !!lastTriggerBtn);
   if (!path) return;
 
   const targetBtn = lastTriggerBtn;

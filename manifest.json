@@ -19,7 +19,7 @@
   "content_scripts": [
     {
       "matches": ["*://*.tulip.co/*"],
-      "js": ["toggles/reorder-row-buttons.js", "toggles/auto-snapshot.js", "toggles/hide-legacy.js", "toggles/disable-tooltips.js", "toggles/hide-view-only-triggers.js", "toggles/move-variables-to-toolbar.js", "toggles/hide-app-editor-chrome.js", "toggles/compact-app-editor-header.js", "toggles/dark-mode.js", "toggles/strip-tab-title-prefix.js", "toggles/filters-builder.js", "toggles/expression-editor-fuzzy.js", "toggles/variable-full-path.js"],
+      "js": ["toggles/reorder-row-buttons.js", "toggles/auto-snapshot.js", "toggles/hide-legacy.js", "toggles/disable-tooltips.js", "toggles/hide-view-only-triggers.js", "toggles/move-variables-to-toolbar.js", "toggles/hide-app-editor-chrome.js", "toggles/compact-app-editor-header.js", "toggles/dark-mode.js", "toggles/strip-tab-title-prefix.js", "toggles/filters-builder.js", "toggles/expression-editor-fuzzy.js", "toggles/variable-full-path.js", "toggles/expand-all-variable-paths.js"],
       "run_at": "document_idle"
     },
     {
