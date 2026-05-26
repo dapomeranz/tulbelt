@@ -22,12 +22,11 @@ const SCROLL_CONTAINER_SELECTOR = '[style*="overflow: auto"][style*="will-change
 const STASH_ATTR = 'data-tulbelt-vfp-original';
 const PATCHED_ATTR = 'data-tulbelt-vfp-patched';
 
-// Anchor selectors for the trigger editor modal. The "Copy link to trigger"
-// button sits at the top-right of the trigger editor, next to the title; it's
-// the most stable insertion point. Falls back to the app editor toolbar
-// (snapshot/translation) if the trigger editor isn't open.
+// Anchor selectors for the trigger editor modal. We insert next to the X
+// close button (top-right of the modal) since the copy-link icon is in the
+// middle of the title row, not at the right edge.
 const TRIGGER_EDITOR_SELECTOR = '[data-testid="trigger-editor"]';
-const TRIGGER_EDITOR_ANCHOR = 'button[aria-label="Copy link to trigger"]';
+const TRIGGER_EDITOR_CLOSE_WRAPPER = '.bootbox-close-button-wrapper';
 const APP_EDITOR_ANCHOR_SELECTORS = [
   '#app-editor-translation',
   '#app-editor-snapshot',
@@ -278,14 +277,14 @@ async function runExpand() {
 // Insert / remove toolbar button
 // ---------------------------------------------------------------------------
 function findToolbarAnchor() {
-  // Prefer the trigger editor (modal) anchor if it's open
+  // Prefer next to the X close button at the modal top-right
   const editor = document.querySelector(TRIGGER_EDITOR_SELECTOR);
   if (editor) {
-    const copyBtn = editor.querySelector(TRIGGER_EDITOR_ANCHOR);
-    if (copyBtn) {
-      // Return the copy-link button's wrapper so we can insert as a sibling
-      return copyBtn.closest('[data-istarget="true"]') || copyBtn;
-    }
+    // The close button wrapper is a sibling of bootbox-body, not inside the
+    // trigger editor itself — search up to modal-body level.
+    const modalBody = editor.closest('.modal-body') || editor.closest('.modal-content') || document;
+    const closeWrapper = modalBody.querySelector(TRIGGER_EDITOR_CLOSE_WRAPPER);
+    if (closeWrapper) return closeWrapper;
   }
   // Fallback to the main app editor toolbar
   for (const sel of APP_EDITOR_ANCHOR_SELECTORS) {
@@ -321,8 +320,14 @@ function insertButton() {
   updateStatusVisibility();
 
   btn.addEventListener('click', runExpand);
-  // Insert after the anchor so our button appears to the right of it
-  anchor.parentElement?.insertBefore(btn, anchor.nextSibling);
+  // If the anchor is the close-button wrapper, insert our button INSIDE it
+  // (before the X) so it shares the float-right positioning. Otherwise, insert
+  // as a sibling.
+  if (anchor.classList.contains('bootbox-close-button-wrapper')) {
+    anchor.insertBefore(btn, anchor.firstChild);
+  } else {
+    anchor.parentElement?.insertBefore(btn, anchor.nextSibling);
+  }
 }
 
 function removeButton() {
