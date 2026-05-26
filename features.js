@@ -133,6 +133,14 @@ export const FEATURES = [
     major: true,
   },
   {
+    id: 'variable-full-path',
+    name: 'Show Full Variable Path on Selection',
+    description:
+      'In the trigger editor, when a nested Object field is selected from a variable dropdown, show the full ancestor path ("Object → Field → SubField") in the selected-value display instead of just the leaf field name.',
+    defaultEnabled: true,
+    major: true,
+  },
+  {
     id: 'expression-editor-fuzzy',
     name: 'Improved Expression Autocomplete',
     description:
