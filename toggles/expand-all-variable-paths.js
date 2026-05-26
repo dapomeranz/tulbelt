@@ -321,7 +321,8 @@ function insertButton() {
   updateStatusVisibility();
 
   btn.addEventListener('click', runExpand);
-  anchor.parentElement?.insertBefore(btn, anchor);
+  // Insert after the anchor so our button appears to the right of it
+  anchor.parentElement?.insertBefore(btn, anchor.nextSibling);
 }
 
 function removeButton() {
