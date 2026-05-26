@@ -22,15 +22,7 @@ const SCROLL_CONTAINER_SELECTOR = '[style*="overflow: auto"][style*="will-change
 const STASH_ATTR = 'data-tulbelt-vfp-original';
 const PATCHED_ATTR = 'data-tulbelt-vfp-patched';
 
-// Anchor selectors for the trigger editor modal. We insert next to the X
-// close button (top-right of the modal) since the copy-link icon is in the
-// middle of the title row, not at the right edge.
-const TRIGGER_EDITOR_SELECTOR = '[data-testid="trigger-editor"]';
-const TRIGGER_EDITOR_CLOSE_WRAPPER = '.bootbox-close-button-wrapper';
-const APP_EDITOR_ANCHOR_SELECTORS = [
-  '#app-editor-translation',
-  '#app-editor-snapshot',
-];
+// The copy-link button's parent wrapper is our anchor for insertion.
 
 let enabled = false;
 let observer = null;
@@ -43,36 +35,21 @@ function ensureStyles() {
   if (document.getElementById(STYLE_ID)) return;
   const style = document.createElement('style');
   style.id = STYLE_ID;
+  // Inline styles on the button handle its base look. We only need a CSS
+  // rule for the progress pill that's visible during a run.
   style.textContent = `
-    #${BTN_ID} {
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      padding: 6px 12px;
-      margin: 0 8px;
-      border: 1px solid #1c69e1;
-      border-radius: 4px;
-      background: #1c69e1;
-      color: #fff;
-      font-size: 12px;
-      font-weight: 500;
-      font-family: inherit;
-      cursor: pointer;
-      line-height: 1.4;
-      white-space: nowrap;
-    }
-    #${BTN_ID}:hover { background: #1556b8; border-color: #1556b8; }
     #${BTN_ID}:disabled { opacity: 0.6; cursor: progress; }
     #${STATUS_ID} {
-      display: inline-block;
+      display: none;
       margin-left: 4px;
-      padding: 2px 6px;
-      border-radius: 10px;
-      background: rgba(255,255,255,0.25);
+      padding: 1px 5px;
+      border-radius: 8px;
+      background: #1c69e1;
       color: #fff;
-      font-size: 11px;
+      font-size: 10px;
       font-weight: 600;
     }
+    #${STATUS_ID}:not(:empty) { display: inline-block; }
   `;
   (document.head || document.documentElement).appendChild(style);
 }
@@ -276,61 +253,65 @@ async function runExpand() {
 // ---------------------------------------------------------------------------
 // Insert / remove toolbar button
 // ---------------------------------------------------------------------------
-function findToolbarAnchor() {
-  // Prefer next to the X close button at the modal top-right
-  const editor = document.querySelector(TRIGGER_EDITOR_SELECTOR);
-  if (editor) {
-    // The close button wrapper is a sibling of bootbox-body, not inside the
-    // trigger editor itself — search up to modal-body level.
-    const modalBody = editor.closest('.modal-body') || editor.closest('.modal-content') || document;
-    const closeWrapper = modalBody.querySelector(TRIGGER_EDITOR_CLOSE_WRAPPER);
-    if (closeWrapper) return closeWrapper;
-  }
-  // Fallback to the main app editor toolbar
-  for (const sel of APP_EDITOR_ANCHOR_SELECTORS) {
-    const el = document.querySelector(sel);
-    if (el) return el;
-  }
-  return null;
+
+// Anchor: the "Copy link to trigger" button's wrapper at the top of the
+// trigger editor modal. We insert as a sibling div right after it so our
+// icon button sits next to the copy-link icon.
+const COPY_LINK_BTN_SELECTOR = 'button[aria-label="Copy link to trigger"]';
+
+function findCopyLinkWrapper() {
+  const copyBtn = document.querySelector(COPY_LINK_BTN_SELECTOR);
+  return copyBtn?.closest('[data-istarget="true"]') || null;
 }
 
 function insertButton() {
   if (document.getElementById(BTN_ID)) return;
-  const anchor = findToolbarAnchor();
-  if (!anchor) return;
+  const copyWrapper = findCopyLinkWrapper();
+  if (!copyWrapper) return;
 
   const btn = document.createElement('button');
   btn.id = BTN_ID;
   btn.type = 'button';
-  btn.title = 'Expand all variable trigger buttons to show full path (Object → Field)';
+  btn.title = 'Expand all variable paths (Object → Field)';
+  btn.setAttribute('aria-label', 'Expand all variable paths');
+  btn.style.cssText = `
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 32px;
+    height: 32px;
+    padding: 0;
+    margin: 0;
+    border: none;
+    outline: none;
+    background: transparent;
+    color: #3a4552;
+    cursor: pointer;
+    border-radius: 4px;
+  `;
   btn.innerHTML = `
-    <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true">
-      <path fill="currentColor" d="M3 6h18v2H3V6zm0 5h12v2H3v-2zm0 5h18v2H3v-2zm15-3v-2l4 3-4 3v-2h-2v-2h2z"/>
+    <svg width="19" height="19" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+      <path d="M3 6h12v2H3V6zm0 5h8v2H3v-2zm0 5h12v2H3v-2zm15.59-9L20 8.41 16.41 12 20 15.59 18.59 17 13.59 12z"/>
     </svg>
-    <span>Expand paths</span>
     <span id="${STATUS_ID}"></span>
   `;
-  btn.querySelector(`#${STATUS_ID}`).textContent = '';
-  // Hide the status pill when empty
-  const status = btn.querySelector(`#${STATUS_ID}`);
-  const updateStatusVisibility = () => {
-    status.style.display = status.textContent ? 'inline-block' : 'none';
-  };
-  new MutationObserver(updateStatusVisibility).observe(status, { childList: true, characterData: true, subtree: true });
-  updateStatusVisibility();
-
+  btn.addEventListener('mouseenter', () => {
+    if (!btn.disabled) btn.style.background = '#f4f6f8';
+  });
+  btn.addEventListener('mouseleave', () => { btn.style.background = 'transparent'; });
   btn.addEventListener('click', runExpand);
-  // If the anchor is the close-button wrapper, insert our button INSIDE it
-  // (before the X) so it shares the float-right positioning. Otherwise, insert
-  // as a sibling.
-  if (anchor.classList.contains('bootbox-close-button-wrapper')) {
-    anchor.insertBefore(btn, anchor.firstChild);
-  } else {
-    anchor.parentElement?.insertBefore(btn, anchor.nextSibling);
-  }
+
+  // Wrap in a div for consistent inline-block behavior next to the copy wrapper
+  const wrapper = document.createElement('div');
+  wrapper.setAttribute('data-tulbelt-expand-wrapper', 'true');
+  wrapper.style.display = 'inline-block';
+  wrapper.appendChild(btn);
+
+  copyWrapper.parentElement?.insertBefore(wrapper, copyWrapper.nextSibling);
 }
 
 function removeButton() {
+  document.querySelector('[data-tulbelt-expand-wrapper]')?.remove();
   document.getElementById(BTN_ID)?.remove();
 }
 
@@ -339,13 +320,7 @@ function removeButton() {
 // ---------------------------------------------------------------------------
 function onMutation() {
   if (!enabled) return;
-  const existing = document.getElementById(BTN_ID);
-  const anchor = findToolbarAnchor();
-  if (!existing && anchor) {
-    insertButton();
-  } else if (existing && !document.body.contains(existing)) {
-    // Already gone; observer will pick it up next mutation
-  } else if (existing && anchor && !existing.parentElement) {
+  if (!document.getElementById(BTN_ID) && findCopyLinkWrapper()) {
     insertButton();
   }
 }
