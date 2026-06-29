@@ -5,7 +5,19 @@ const TABLE_URL_RE = /^https:\/\/([^/]+)\.tulip\.co((?:\/w\/[^/]+)?\/table\/[^?]
 const SORT_QUERY =
   "sortOptions=%5B%7B%22sortBy%22%3A%22_createdAt%22%2C%22sortDir%22%3A%22desc%22%7D%5D&offset=0";
 
-async function syncRules() {
+// Serializes overlapping syncRules() calls. onInstalled and onStartup (and a
+// storage change) can fire close together; without this, two concurrent runs
+// both read the same `existing` set and then both try to add the same rule id,
+// producing "Rule with id N does not have a unique ID". Chaining each call onto
+// the previous one guarantees getDynamicRules/updateDynamicRules run atomically.
+let syncRulesChain = Promise.resolve();
+
+function syncRules() {
+  syncRulesChain = syncRulesChain.then(doSyncRules, doSyncRules);
+  return syncRulesChain;
+}
+
+async function doSyncRules() {
   const toggles = await getToggles();
   const existing = await chrome.declarativeNetRequest.getDynamicRules();
   const removeRuleIds = existing.map((r) => r.id);
