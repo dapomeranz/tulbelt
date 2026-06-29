@@ -52,46 +52,108 @@
 
   // ── API ─────────────────────────────────────────────────────────────────────
 
-  async function fetchAllPendingApps() {
+  // Shared headers/session guard for API calls.
+  function requireSession() {
     scrapePerformanceEntries();
-    const { auth, userId, wsId } = getSession();
-
-    if (!auth || !userId || !wsId) {
-      const missing = [!auth && "auth token", !userId && "user ID", !wsId && "workspace ID"]
+    const s = getSession();
+    if (!s.auth || !s.userId || !s.wsId) {
+      const missing = [!s.auth && "auth token", !s.userId && "user ID", !s.wsId && "workspace ID"]
         .filter(Boolean).join(", ");
       throw new Error(`Session not ready (missing: ${missing}) — hard-reload the page and try again.`);
     }
+    return s;
+  }
 
+  function apiHeaders(auth) {
+    return { Authorization: auth, "time-zone": "America/New_York" };
+  }
+
+  async function apiJson(url, auth) {
+    const resp = await fetch(url, { credentials: "include", headers: apiHeaders(auth) });
+    if (!resp.ok) {
+      const body = await resp.text().catch(() => "");
+      throw new Error(`API error ${resp.status}${body ? `: ${body.slice(0, 120)}` : ""}`);
+    }
+    return resp.json();
+  }
+
+  // Run async tasks with limited concurrency to avoid hammering the API.
+  async function mapLimit(items, limit, fn) {
+    const results = [];
+    let i = 0;
+    async function worker() {
+      while (i < items.length) {
+        const idx = i++;
+        results[idx] = await fn(items[idx], idx);
+      }
+    }
+    await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+    return results;
+  }
+
+  // Data source strategy (determined empirically — see PR notes):
+  //   - apps-pending-approval?userId={me} only returns apps still awaiting the
+  //     current user's approval; it drops apps once you've approved them.
+  //   - The general /apps list does NOT embed pendingApproval, BUT apps that
+  //     have a pending approval carry a truthy `pendingApprovalVersionId`.
+  //   - The per-app versions endpoint
+  //       /apps/{id}/versions?limit=20
+  //     returns each version's `approvals[]` plus `created.by` (the submitter).
+  //
+  // So: page the apps list, keep the ~dozens with pendingApprovalVersionId,
+  // then fetch versions for just those (limited concurrency), find the pending
+  // version, and keep ones the current user submitted (created.by.id === me)
+  // that still have at least one pending approval (from anyone). This surfaces
+  // apps you submitted AND already approved but are waiting on others for.
+  async function fetchAllPendingApps() {
+    const { auth, wsId } = requireSession();
+
+    // Stage 1: enumerate apps, keep those with a pending approval version.
     const limit = 50;
     let offset = 0;
-    const all = [];
-
+    const candidates = [];
     while (true) {
-      const url =
-        `/api/apps/v1/w/${wsId}/apps-pending-approval` +
-        `?userId=${encodeURIComponent(userId)}&offset=${offset}&limit=${limit}&sort=name`;
-
-      const resp = await fetch(url, {
-        credentials: "include",
-        headers: {
-          Authorization: auth,
-          "time-zone": "America/New_York",
-        },
-      });
-
-      if (!resp.ok) {
-        const body = await resp.text().catch(() => "");
-        throw new Error(`API error ${resp.status}${body ? `: ${body.slice(0, 120)}` : ""}`);
-      }
-
-      const data = await resp.json();
+      const data = await apiJson(
+        `/api/apps/v1/w/${wsId}/apps?offset=${offset}&limit=${limit}&sort=name`,
+        auth,
+      );
       const items = Array.isArray(data) ? data : (data.items ?? data.apps ?? []);
-      all.push(...items);
+      for (const app of items) {
+        if (app.pendingApprovalVersionId) candidates.push(app);
+      }
       if (items.length < limit) break;
       offset += limit;
     }
 
-    return all;
+    // Stage 2: fetch versions for each candidate; attach the pending version's
+    // approvals + submitter onto a synthesized pendingApproval object so the
+    // rest of the code (filter/render) keeps the same shape it expects.
+    await mapLimit(candidates, 6, async (app) => {
+      try {
+        const data = await apiJson(
+          `/api/apps/v1/w/${wsId}/apps/${app.id}/versions?offset=0&limit=20`,
+          auth,
+        );
+        const versions = Array.isArray(data) ? data : (data.items ?? data.versions ?? []);
+        const pending =
+          versions.find((v) => v.id === app.pendingApprovalVersionId) ??
+          versions.find((v) => v.approvals?.some((a) => a.status === "pending"));
+        if (pending) {
+          app.pendingApproval = {
+            versionId: pending.id,
+            approvals: pending.approvals ?? [],
+            requestedApproval: {
+              at: pending.created?.at,
+              by: pending.created?.by,
+            },
+          };
+        }
+      } catch (_) {
+        // Skip apps whose versions we can't read (403/401 on some).
+      }
+    });
+
+    return candidates.filter((app) => app.pendingApproval);
   }
 
   function filterSubmittedByMe(apps) {
@@ -343,7 +405,7 @@
         }
       }
 
-      renderStatus(panel, "Loading…");
+      renderStatus(panel, "Loading your submitted apps… (checking approval status)");
 
       try {
         const allApps = await fetchAllPendingApps();
