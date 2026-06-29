@@ -39,6 +39,7 @@
         "toggles/action-editor-frequent.js",
         "toggles/query-list-search.js",
         "toggles/history-search.js",
+        "toggles/submitted-pending-approvals.js",
         "toggles/app-list-date-columns.js",
         "toggles/dev-probe.js"
       ],
@@ -71,7 +72,8 @@
         "*://*.tulip.co/*"
       ],
       "js": [
-        "toggles/app-list-date-columns-main.js"
+        "toggles/app-list-date-columns-main.js",
+        "toggles/submitted-pending-approvals-main.js"
       ],
       "run_at": "document_start",
       "world": "MAIN"
