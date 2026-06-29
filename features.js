@@ -194,6 +194,14 @@ export const FEATURES = [
     major: false,
   },
   {
+    id: "submitted-pending-approvals",
+    name: "Pending Approvals: Show Apps I Submitted",
+    description:
+      'On the Pending Approvals page, adds a toggle pill next to the page heading that switches between "Pending my approval" (Tulip\'s default view) and "Submitted by me" — apps you submitted for approval that still have at least one pending sign-off from someone else.',
+    defaultEnabled: true,
+    major: true,
+  },
+  {
     id: "dev-tools",
     name: "Dev Tools (Agent Debugging)",
     description:
