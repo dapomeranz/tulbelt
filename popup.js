@@ -1,9 +1,10 @@
 import {
   getDeveloperMode,
-  getPopupFeatureGroups,
+  getPopupFeatures,
   getToggles,
   setDeveloperMode,
   setToggle,
+  setToggles,
 } from "./features.js";
 
 const DEV_MODE_CLICKS = 5;
@@ -14,17 +15,22 @@ featureTemplate.innerHTML = `
   <li class="feature">
     <label>
       <span class="feature-name"></span>
-      <span class="switch">
-        <input type="checkbox" />
-        <span class="slider"></span>
+      <span class="feature-controls">
+        <span class="feature-info" aria-hidden="true">
+          <svg width="14" height="14" viewBox="0 0 16 16">
+            <path
+              fill="currentColor"
+              d="M8 1.25a6.75 6.75 0 1 1 0 13.5 6.75 6.75 0 0 1 0-13.5Zm0 1.3a5.45 5.45 0 1 0 0 10.9 5.45 5.45 0 0 0 0-10.9ZM8 4.1a.9.9 0 1 1 0 1.8.9.9 0 0 1 0-1.8Zm-.75 2.85h1.5v4.7h-1.5v-4.7Z"
+            />
+          </svg>
+        </span>
+        <span class="switch">
+          <input type="checkbox" aria-describedby="tooltip" />
+          <span class="slider"></span>
+        </span>
       </span>
     </label>
   </li>
-`;
-
-const sectionTemplate = document.createElement("template");
-sectionTemplate.innerHTML = `
-  <li class="feature-section"><span class="feature-section-label"></span></li>
 `;
 
 const tooltip = document.getElementById("tooltip");
@@ -69,53 +75,65 @@ function hideTooltip() {
   tooltip.hidden = true;
 }
 
-function bindTooltip(label, text) {
-  label.addEventListener("mouseenter", () => showTooltip(text, label));
-  label.addEventListener("mouseleave", hideTooltip);
-  label.addEventListener("focusin", () => showTooltip(text, label));
-  label.addEventListener("focusout", hideTooltip);
+function bindHoverTooltip(anchor, text) {
+  anchor.addEventListener("mouseenter", () => showTooltip(text, anchor));
+  anchor.addEventListener("mouseleave", hideTooltip);
+  anchor.addEventListener("focusin", () => showTooltip(text, anchor));
+  anchor.addEventListener("focusout", hideTooltip);
 }
 
-function createSectionNode(title, sectionId) {
-  const node = sectionTemplate.content.firstElementChild.cloneNode(true);
-  node.querySelector(".feature-section-label").textContent = title;
-  node.dataset.section = sectionId;
-  return node;
+// The icon is a plain <span> on purpose: a <button> here would be the first
+// labelable element inside the row's <label> and would steal the clicks meant
+// for the checkbox, leaving the switch dead.
+function bindInfoIcon(icon, checkbox, description) {
+  icon.addEventListener("mouseenter", () => showTooltip(description, icon));
+  icon.addEventListener("mouseleave", hideTooltip);
+  // Reading the description shouldn't flip the feature: cancel the click so the
+  // surrounding label doesn't forward it to the checkbox.
+  icon.addEventListener("click", (event) => event.preventDefault());
+  // Keyboard users never hover, so give them the same text off the switch's
+  // focus — anchored to the icon either way. :focus-visible keeps this to
+  // keyboard focus, so clicking a row doesn't pop the tooltip.
+  checkbox.addEventListener("focus", () => {
+    if (checkbox.matches(":focus-visible")) showTooltip(description, icon);
+  });
+  checkbox.addEventListener("blur", hideTooltip);
 }
 
-function createFeatureNode(feature, enabled, sectionId) {
+function createFeatureNode(feature, enabled) {
   const node = featureTemplate.content.firstElementChild.cloneNode(true);
-  const label = node.querySelector("label");
   node.querySelector(".feature-name").textContent = feature.name;
   node.dataset.featureId = feature.id;
   node.dataset.search = `${feature.name} ${feature.description}`.toLowerCase();
-  node.dataset.section = sectionId;
-  bindTooltip(label, feature.description);
   const cb = node.querySelector("input");
+  bindInfoIcon(node.querySelector(".feature-info"), cb, feature.description);
   cb.checked = enabled;
   cb.addEventListener("change", () => setToggle(feature.id, cb.checked));
   return node;
 }
 
 function buildPopupFeatures(toggles, showDeveloperFeatures) {
-  const { major, more } = getPopupFeatureGroups({ showDeveloperFeatures });
-  const items = [];
+  return getPopupFeatures({ showDeveloperFeatures }).map((feature) =>
+    createFeatureNode(feature, toggles[feature.id]),
+  );
+}
 
-  if (major.length) {
-    items.push(createSectionNode("Major", "major"));
-    for (const feature of major) {
-      items.push(createFeatureNode(feature, toggles[feature.id], "major"));
-    }
+// Only ever runs with the list unfiltered (the links hide during a search), so
+// this is every row the popup is showing — which can never include a
+// developer-only feature, as those aren't rendered outside developer mode.
+function setAll(list, enabled) {
+  const updates = {};
+  for (const node of list.querySelectorAll(".feature")) {
+    node.querySelector("input").checked = enabled;
+    updates[node.dataset.featureId] = enabled;
   }
+  return setToggles(updates);
+}
 
-  if (more.length) {
-    items.push(createSectionNode("More", "more"));
-    for (const feature of more) {
-      items.push(createFeatureNode(feature, toggles[feature.id], "more"));
-    }
-  }
-
-  return items;
+// The links read as covering the whole list, so they only show while the whole
+// list is on screen — a search hides them rather than quietly narrowing them.
+function syncBulkActions(bulkActions, query) {
+  bulkActions.hidden = query.trim() !== "";
 }
 
 function filterFeatures(query, list, noResults) {
@@ -128,14 +146,6 @@ function filterFeatures(query, list, noResults) {
     const show = !q || node.dataset.search.includes(q);
     node.hidden = !show;
     if (show) visibleFeatures++;
-  }
-
-  for (const section of list.querySelectorAll(".feature-section")) {
-    const sectionId = section.dataset.section;
-    const hasVisible = [...list.querySelectorAll(`.feature[data-section="${sectionId}"]`)].some(
-      (node) => !node.hidden,
-    );
-    section.hidden = !hasVisible;
   }
 
   noResults.hidden = visibleFeatures > 0;
@@ -178,16 +188,25 @@ async function render() {
   const list = document.getElementById("toggles");
   const search = document.getElementById("feature-search");
   const noResults = document.getElementById("no-results");
+  const bulkActions = document.querySelector(".bulk-actions");
 
   setDeveloperModeSubtitle(developerMode);
   list.replaceChildren(...buildPopupFeatures(toggles, developerMode));
 
-  search.addEventListener("input", () => filterFeatures(search.value, list, noResults));
+  const applyFilter = () => {
+    filterFeatures(search.value, list, noResults);
+    syncBulkActions(bulkActions, search.value);
+  };
+
+  search.addEventListener("input", applyFilter);
+  bulkActions.querySelector("#all-on").addEventListener("click", () => setAll(list, true));
+  bulkActions.querySelector("#all-off").addEventListener("click", () => setAll(list, false));
+  syncBulkActions(bulkActions, search.value);
 
   document.addEventListener("scroll", hideTooltip, true);
 
   for (const link of document.querySelectorAll(".header-links a")) {
-    bindTooltip(link, link.getAttribute("aria-label"));
+    bindHoverTooltip(link, link.getAttribute("aria-label"));
     link.addEventListener("click", (e) => {
       e.preventDefault();
       hideTooltip();
@@ -199,7 +218,7 @@ async function render() {
     setDeveloperModeSubtitle(enabled);
     const nextToggles = await getToggles();
     list.replaceChildren(...buildPopupFeatures(nextToggles, enabled));
-    filterFeatures(search.value, list, noResults);
+    applyFilter();
   });
 }
 

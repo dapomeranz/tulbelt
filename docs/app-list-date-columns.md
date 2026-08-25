@@ -3,7 +3,7 @@
 Toggle `app-list-date-columns` ("App List: Created & Completed Columns"). On
 app/folder list pages (e.g. `/w/<ws>/apps/folders/<folderId>`) it adds two
 columns — **Created** and **Last Completed** — after the existing **Last
-Modified** column. Ships on by default.
+Modified** column. Ships off by default.
 
 ## Why two halves (MAIN + isolated world)
 

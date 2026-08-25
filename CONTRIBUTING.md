@@ -44,7 +44,7 @@ changes that add a toolchain or framework will be asked to justify themselves.
      id: 'my-feature',          // stable, kebab-case, never reused
      name: 'Human readable name',
      description: 'One sentence the popup shows.',
-     defaultEnabled: false,     // be conservative; most start off
+     defaultEnabled: false,     // always false — every toggle ships off
      developerOnly: true,       // optional — hidden until dev mode (see below)
    },
    ```

@@ -2,7 +2,7 @@
 
 Toggle `history-search` ("App & Table History (⌘K / Ctrl+K)"). One isolated-world
 content script that logs the apps and tables you open and adds a **⌘K/Ctrl+K**
-search palette to jump back to any of them. Ships on by default.
+search palette to jump back to any of them. Ships off by default.
 
 ## Two concerns
 

@@ -45,6 +45,8 @@
         "toggles/option-sets-builder.js",
         "toggles/option-sets-trigger.js",
         "toggles/trigger-value-full-text.js",
+        "toggles/flatten-top-menu.js",
+        "toggles/paste-trigger-anywhere.js",
         "toggles/dev-probe.js"
       ],
       "run_at": "document_idle"
@@ -77,7 +79,8 @@
       ],
       "js": [
         "toggles/app-list-date-columns-main.js",
-        "toggles/submitted-pending-approvals-main.js"
+        "toggles/submitted-pending-approvals-main.js",
+        "toggles/paste-trigger-anywhere-main.js"
       ],
       "run_at": "document_start",
       "world": "MAIN"

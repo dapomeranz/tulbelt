@@ -158,6 +158,40 @@ header .subtitle {
   cursor: pointer;
 }
 
+/* Bulk actions: text links over the whole list, hidden while a search filters it */
+.bulk-actions {
+  flex-shrink: 0;
+  display: flex;
+  gap: 12px;
+  padding: 7px 14px;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.bulk-actions[hidden] {
+  display: none;
+}
+
+.bulk-actions button {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--accent);
+  cursor: pointer;
+}
+
+.bulk-actions button:hover {
+  text-decoration: underline;
+}
+
+.bulk-actions button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 3px;
+}
+
 /* Toggle list: inset hover pills, scrolls below search */
 ul#toggles {
   flex: 1;
@@ -189,19 +223,6 @@ ul#toggles::-webkit-scrollbar-thumb {
   text-align: center;
 }
 
-.feature-section {
-  padding: 10px 9px 4px;
-  list-style: none;
-}
-
-.feature-section-label {
-  font-size: 10px;
-  font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.06em;
-  color: var(--muted);
-}
-
 .feature label {
   display: flex;
   align-items: center;
@@ -219,6 +240,7 @@ ul#toggles::-webkit-scrollbar-thumb {
 }
 
 .feature-name {
+  flex: 1;
   min-width: 0;
   font-size: 12.5px;
   font-weight: 500;
@@ -226,6 +248,29 @@ ul#toggles::-webkit-scrollbar-thumb {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+
+/* Info icon + toggle, kept together at the right edge of the row */
+.feature-controls {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex-shrink: 0;
+}
+
+.feature-info {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  color: var(--muted);
+  cursor: help;
+  transition: color 0.12s ease;
+}
+
+.feature-info:hover {
+  color: var(--accent);
 }
 
 .switch {
