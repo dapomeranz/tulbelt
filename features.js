@@ -15,7 +15,7 @@ export const FEATURES = [
     name: "Sort Tables New to Old",
     description:
       'On the tables page, redirects to a URL that sorts by _createdAt descending. Also fixes the browser Back button, which this redirect otherwise made "go to itself".',
-    defaultEnabled: false,
+    defaultEnabled: true,
     rule: {
       condition: {
         // Group 2 captures the path tail including the optional /w/<ws> prefix
@@ -39,27 +39,27 @@ export const FEATURES = [
     name: "Quicker App Button Access",
     description:
       "On app and folder lists, move the edit and actions buttons next to each row’s name instead of the far right.",
-    defaultEnabled: false,
+    defaultEnabled: true,
   },
   {
     id: "auto-snapshot",
     name: "Auto-Snapshot Every 15 Minutes",
     description:
       "Track active editing time per app and automatically create a snapshot every 15 minutes of activity.",
-    defaultEnabled: false,
+    defaultEnabled: true,
   },
   {
     id: "hide-legacy-tiles",
     name: "Hide Minor Legacy Features",
     description:
       "In the app editor context pane, hide deprecated tiles: Step cycle time, Step comments, Process cycle time, and App comments.",
-    defaultEnabled: false,
+    defaultEnabled: true,
   },
   {
     id: "disable-tooltips",
     name: "Disable Copy Hover Tooltips",
     description: "Suppress the tooltip pop-ups on hover-only action buttons which cause misclicks.",
-    defaultEnabled: false,
+    defaultEnabled: true,
   },
   {
     id: "hide-view-only-triggers",
@@ -71,7 +71,7 @@ export const FEATURES = [
     id: "move-variables-to-toolbar",
     name: "Variables Button to Toolbar",
     description: "Move the Variables tile in the app editor context pane to the top toolbar.",
-    defaultEnabled: false,
+    defaultEnabled: true,
   },
   {
     id: "dark-mode",
@@ -92,35 +92,35 @@ export const FEATURES = [
     name: "Slim App Editor Header",
     description:
       "In the app editor: hide the workspace name beside breadcrumbs; hide leading icons on palette buttons (Add, Icons, …, Forward/Back); tighten vertical padding on the subheader and palette rows.",
-    defaultEnabled: false,
+    defaultEnabled: true,
   },
   {
     id: "context-menu-copy-cut",
     name: "Right Click -> Copy Widget",
     description:
       "In the app editor canvas widget context menu (Delete / Move To Front / Back), add Copy (Ctrl+C) and Cut (Ctrl+X) rows that trigger those shortcuts when clicked.",
-    defaultEnabled: false,
+    defaultEnabled: true,
   },
   {
     id: "strip-tab-title-prefix",
     name: 'Strip "Tulip | " from Tab Titles',
     description:
       'Remove the leading "Tulip | " prefix from browser tab/window titles so the page-specific name shows first.',
-    defaultEnabled: false,
+    defaultEnabled: true,
   },
   {
     id: "filters-builder",
     name: "Visual Tulip API Filters Builder",
     description:
       "On connector function pages, replace the JSON text box for the `filters` query parameter with a row-per-filter builder (field, function, arg). Variable pills round-trip as `$Name$` strings; type `$Name$` directly in an arg field to reference a variable.",
-    defaultEnabled: false,
+    defaultEnabled: true,
   },
   {
     id: "variable-full-path",
     name: "Show Full Variable Path on Selection",
     description:
       'In the trigger editor, show the full ancestor path ("Object → Field → SubField") for nested Object fields instead of just the leaf field name. Patches each variable as you select it, and also auto-expands all already-selected variables once when the trigger editor opens.',
-    defaultEnabled: false,
+    defaultEnabled: true,
   },
   {
     id: "expression-editor-fuzzy",
@@ -135,35 +135,35 @@ export const FEATURES = [
     name: "Collapse Records Rows",
     description:
       'On app editor pages, click the caret at the right edge of a table row in the Tables tile to collapse/expand its Query, Record Placeholder, and linked record buttons. Each table starts collapsed — only the icon, table name, and a two-line "· N placeholders" / "· M aggregations" summary show until you expand it. The table name still opens its menu on click. A "Collapse all" / "Expand all" toggle below the Add Table row collapses or expands every table at once.',
-    defaultEnabled: false,
+    defaultEnabled: true,
   },
   {
     id: "action-editor-frequent",
     name: "Frequent Trigger Actions On Top",
     description:
       "Collapse the trigger action-type dropdown to Data Manipulation, Table Records, Run Function, and Run Connector Function, plus a “Show all actions…” option that expands the full list.",
-    defaultEnabled: false,
+    defaultEnabled: true,
   },
   {
     id: "snap-to-grid",
     name: "Snap Widgets to 10px Grid",
     description:
       "In the app editor, snap a widget’s position and size to the nearest multiple of 10 when you finish dragging or resizing it. Only the values changed by that interaction are snapped; clicking a widget or manually editing the X/Y/W/H fields is left alone.",
-    defaultEnabled: false,
+    defaultEnabled: true,
   },
   {
     id: "query-list-search",
     name: "Searchable Table Queries",
     description:
       "In the Query picker popup, cap its height to the screen (the list scrolls inside) and add a sticky search box at the top that filters the saved queries by name as you type.",
-    defaultEnabled: false,
+    defaultEnabled: true,
   },
   {
     id: "history-search",
     name: "Quick Search History (⌘K / Ctrl+K)",
     description:
       "Logs every app, table, and connector function you open and adds a ⌘K (Ctrl+K on Windows/Linux) search palette to jump back to any of them by name or folder. Enter opens in the current tab; Ctrl/Cmd+Enter opens a new tab.",
-    defaultEnabled: false,
+    defaultEnabled: true,
   },
   {
     id: "app-list-date-columns",
@@ -177,21 +177,21 @@ export const FEATURES = [
     name: "Pending Approvals: Show Apps I Submitted",
     description:
       'On the Pending Approvals page, adds a toggle pill next to the page heading that switches between "Pending my approval" (Tulip\'s default view) and "Submitted by me" — apps you submitted for approval that still have at least one pending sign-off from someone else.',
-    defaultEnabled: false,
+    defaultEnabled: true,
   },
   {
     id: "option-sets-builder",
     name: "Option Sets Builder",
     description:
       'Adds an "Option Sets" page to Account Settings at the fake URL /account/option-sets. Build named option sets typed as Text, Integer, or Number: add, edit, reorder, and remove options, each with an optional description. In trigger editors, the "Select source of data" dropdown gains an "Option Set" entry — pick a set, pick an option, and the row is filled in as a normal Static value. Stored in the tenant\'s localStorage — local to this browser and Tulip instance.',
-    defaultEnabled: false,
+    defaultEnabled: true,
   },
   {
     id: "trigger-value-full-text",
     name: "Show Full Trigger Value Text",
     description:
       "In the trigger editor, when a value text box's content is longer than the box, replace it with an editable box that sizes to its text — beside the selects while it fits there, wrapping to its own line when it doesn't, and going full-width only once the text spans 2+ lines. Short values keep the normal input; the swap only happens when the field isn't focused, and Enter still commits.",
-    defaultEnabled: false,
+    defaultEnabled: true,
   },
   {
     id: "flatten-top-menu",

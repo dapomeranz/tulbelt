@@ -13,7 +13,7 @@ Toggles are listed alphabetically in one ungrouped run, as the popup shows them.
 (The popup sorts by each toggle's `name`; the headings below are this page's own
 titles, so the two orders are close but not identical.)
 
-### App list Created/Completed columns — `app-list-date-columns` · **default: off**
+### App list Created/Completed columns — `app-list-date-columns` · **default: on**
 
 On app/folder list pages, adds **Created** and **Last Completed** columns after
 **Last Modified**. Those dates aren't in the DOM — they live in the JSON the page
@@ -56,7 +56,7 @@ padding on the subheader and palette rows. (Supersedes the older
 `hide-app-editor-palette-icons` and `hide-subheader-workspace-label` toggles,
 which migrate automatically.)
 
-### Copy/Cut in widget menu — `context-menu-copy-cut` · **default: off**
+### Copy/Cut in widget menu — `context-menu-copy-cut` · **default: on**
 
 In the app editor canvas widget context menu (Delete / Move To Front / Back),
 adds Copy (Ctrl+C) and Cut (Ctrl+X) rows that synthesize those keyboard
@@ -189,7 +189,7 @@ Modified and middle clicks keep the browser's normal new-tab behavior. The
 section highlight is re-homed onto the flattened link whose path best matches
 the current URL, using the active/inactive looks read off the real anchors.
 
-### Frequent actions on top — `action-editor-frequent` · **default: off**
+### Frequent actions on top — `action-editor-frequent` · **default: on**
 
 Collapses the trigger action-type dropdown (`select[data-testid$="action-editor"]`)
 to Data Manipulation, Table Records, Run Function, and Run Connector Function,
@@ -201,7 +201,7 @@ proxy `<select>` is rendered in its place (the real one is hidden) and
 selections are forwarded back to React via a native value setter + bubbling
 change event.
 
-### Full variable path on selection — `variable-full-path` · **default: off**
+### Full variable path on selection — `variable-full-path` · **default: on**
 
 In the trigger editor variable picker, when you select a nested Object field,
 rewrites the trigger button label from the leaf name only to the full ancestor
@@ -235,7 +235,7 @@ visible.
 On app version editor pages only (`/w/…/apps/…/versions/…`), hides the site
 header, subheader row (breadcrumbs, Run/Publish), and Add/Icons palette.
 
-### Hide legacy editor tiles — `hide-legacy-tiles` · **default: off**
+### Hide legacy editor tiles — `hide-legacy-tiles` · **default: on**
 
 In the app editor context pane, hides deprecated tiles: Step cycle time, Step
 comments, Process cycle time, and App comments.
@@ -245,7 +245,7 @@ comments, Process cycle time, and App comments.
 Hides the Variables tile in the app editor context pane and mirrors its Edit
 button into the top toolbar.
 
-### Option Sets builder — `option-sets-builder` · **default: off**
+### Option Sets builder — `option-sets-builder` · **default: on**
 
 On `/account/*` pages, adds an **Option Sets** item to the Account Settings
 sidebar. Clicking it shows a Tulbelt-owned page at the fake URL
@@ -309,12 +309,12 @@ trigger editor opens — there is no save to confirm it, so an unwanted paste is
 real record to delete. Deep dive:
 [paste-trigger-anywhere.md](./paste-trigger-anywhere.md).
 
-### Row actions next to name — `reorder-row-buttons` · **default: off**
+### Row actions next to name — `reorder-row-buttons` · **default: on**
 
 On app and folder lists, moves each row's edit and actions buttons next to the
 row's name instead of leaving them at the far right.
 
-### Searchable query picker — `query-list-search` · **default: off**
+### Searchable query picker — `query-list-search` · **default: on**
 
 In the Query picker popper (the column of saved-query buttons opened from a
 Query field), caps the popper column to 75% of the viewport height — the list
@@ -330,7 +330,7 @@ portal-mounted with hashed class names, so it's found by content (the
 filter. Tulip's React buttons are never reparented — only hidden inline — so
 the transient popper reverts cleanly on disable.
 
-### Show full trigger value text — `trigger-value-full-text` · **default: off**
+### Show full trigger value text — `trigger-value-full-text` · **default: on**
 
 In the trigger editor, when a Value Picker text box's content is longer than
 the box (`input[aria-label="Value Picker"]`, e.g. static Text values), replaces
@@ -362,7 +362,7 @@ so Tulip's commit-on-blur handler persists it. A move snaps only X/Y, a resize
 snaps size (and X/Y if the handle moved them); fields the interaction didn't
 change — and values typed directly into the inputs — are left untouched.
 
-### Sort tables by newest — `table-default-sort` · **default: off**
+### Sort tables by newest — `table-default-sort` · **default: on**
 
 On tulip.co table views, redirects to a URL that sorts by `_createdAt`
 descending so the most recently created rows are on top. Implemented as a
@@ -377,7 +377,7 @@ the browser Back button "go to itself".
 Removes the leading "Tulip | " prefix from browser tab/window titles so the
 page-specific name shows first.
 
-### Visual filters editor — `filters-builder` · **default: off**
+### Visual filters editor — `filters-builder` · **default: on**
 
 On connector function pages, replaces the JSON text box for the `filters` query
 parameter with a row-per-filter builder (field, function, arg), built on a
