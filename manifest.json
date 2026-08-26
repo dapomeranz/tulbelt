@@ -35,6 +35,7 @@
         "toggles/strip-tab-title-prefix.js",
         "toggles/filters-builder.js",
         "toggles/variable-full-path.js",
+        "toggles/expand-all-variable-paths.js",
         "toggles/expression-editor-fuzzy.js",
         "toggles/collapse-tables-tile.js",
         "toggles/action-editor-frequent.js",

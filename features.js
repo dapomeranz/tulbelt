@@ -123,6 +123,13 @@ export const FEATURES = [
     defaultEnabled: true,
   },
   {
+    id: "expand-all-variable-paths",
+    name: "Expand All Variable Paths Button",
+    description:
+      'Adds an "Expand paths" button to the app editor toolbar. Clicking it briefly opens each variable trigger button on the page to learn the selected item’s full hierarchy, then rewrites the display to show "Object → Field → SubField". Skips top-level variables and already-expanded buttons.',
+    defaultEnabled: false,
+  },
+  {
     id: "expression-editor-fuzzy",
     name: "Improved Expression Autocomplete",
     description:

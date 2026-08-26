@@ -84,6 +84,19 @@ clears the buffer. Workflow and API: [devtools.md](./devtools.md).
 Suppresses the tooltip pop-ups on hover-only action buttons (cut, copy, etc.)
 while leaving toolbar button tooltips intact.
 
+### Expand all variable paths — `expand-all-variable-paths` · **default: off**
+
+Adds an **Expand paths** button beside the trigger editor's "Copy link to
+trigger" control. Clicking it walks every variable trigger button on the page,
+briefly opening each dropdown to learn the selected item's full hierarchy, then
+rewrites the label to "Object → Field → SubField". A status pill ("3 / 12")
+tracks progress. Top-level variables and buttons already patched by
+`variable-full-path` are skipped.
+
+Overlaps `variable-full-path`, which now auto-expands already-selected
+variables when the trigger editor opens; this toggle is the manual, on-demand
+sweep for pages that variable-full-path's one-time pass missed.
+
 ### Flatten top menu — `flatten-top-menu` · **default: off**
 
 Lifts the links Tulip hides inside the header's hover dropdowns
