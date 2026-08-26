@@ -301,6 +301,22 @@ export async function seedDefaults() {
 
 // One read-modify-write for the whole batch, so flipping many toggles at once
 // fires a single storage.onChanged for content scripts to re-sync from.
+// The popup's "Restore Defaults": unlike seedDefaults(), which only fills in
+// missing keys, this overwrites every choice with the feature's declared
+// `defaultEnabled`. Deliberately ignores the compact-app-editor-header legacy
+// migration — that migration exists to carry a prior choice forward, and this
+// is the user asking to discard their choices.
+export async function restoreDefaults() {
+  const next = {};
+  for (const f of FEATURES) {
+    // Same invariant as seedDefaults(): content scripts read raw storage, so a
+    // developer-only feature must never be written true.
+    next[f.id] = f.developerOnly === true ? false : f.defaultEnabled;
+  }
+  await chrome.storage.local.set({ [STORAGE_KEY]: next });
+  return next;
+}
+
 export async function setToggles(updates) {
   const { [STORAGE_KEY]: stored = {} } = await chrome.storage.local.get(STORAGE_KEY);
   await chrome.storage.local.set({

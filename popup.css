@@ -182,6 +182,11 @@ header .subtitle {
   cursor: pointer;
 }
 
+/* Sits apart from the two bulk links: it discards choices rather than setting
+   them all one way. */
+.bulk-actions .bulk-trailing {
+  margin-left: auto;
+}
 .bulk-actions button:hover {
   text-decoration: underline;
 }

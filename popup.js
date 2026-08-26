@@ -2,6 +2,7 @@ import {
   getDeveloperMode,
   getPopupFeatures,
   getToggles,
+  restoreDefaults,
   setDeveloperMode,
   setToggle,
   setToggles,
@@ -130,6 +131,17 @@ function setAll(list, enabled) {
   return setToggles(updates);
 }
 
+// Writes every feature's declared default back to storage, then mirrors the
+// result onto the switches. Reads from the returned map rather than the node's
+// own state because a restore can flip rows in either direction, and because
+// developer-only rows are forced off in storage regardless of their default.
+async function applyDefaults(list) {
+  const defaults = await restoreDefaults();
+  for (const node of list.querySelectorAll(".feature")) {
+    node.querySelector("input").checked = defaults[node.dataset.featureId] === true;
+  }
+}
+
 // The links read as covering the whole list, so they only show while the whole
 // list is on screen — a search hides them rather than quietly narrowing them.
 function syncBulkActions(bulkActions, query) {
@@ -201,6 +213,9 @@ async function render() {
   search.addEventListener("input", applyFilter);
   bulkActions.querySelector("#all-on").addEventListener("click", () => setAll(list, true));
   bulkActions.querySelector("#all-off").addEventListener("click", () => setAll(list, false));
+  bulkActions
+    .querySelector("#restore-defaults")
+    .addEventListener("click", () => applyDefaults(list));
   syncBulkActions(bulkActions, search.value);
 
   document.addEventListener("scroll", hideTooltip, true);
