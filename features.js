@@ -46,7 +46,7 @@ export const FEATURES = [
     name: "Auto-Snapshot Every 15 Minutes",
     description:
       "Track active editing time per app and automatically create a snapshot every 15 minutes of activity.",
-    defaultEnabled: true,
+    defaultEnabled: false,
   },
   {
     id: "hide-legacy-tiles",
@@ -92,7 +92,7 @@ export const FEATURES = [
     name: "Slim App Editor Header",
     description:
       "In the app editor: hide the workspace name beside breadcrumbs; hide leading icons on palette buttons (Add, Icons, …, Forward/Back); tighten vertical padding on the subheader and palette rows.",
-    defaultEnabled: true,
+    defaultEnabled: false,
   },
   {
     id: "context-menu-copy-cut",

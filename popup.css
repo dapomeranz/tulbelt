@@ -33,10 +33,8 @@
 body {
   margin: 0;
   width: 272px;
-  max-height: 420px;
   display: flex;
   flex-direction: column;
-  overflow: hidden;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
   background: var(--bg);
   color: var(--fg);
@@ -197,27 +195,14 @@ header .subtitle {
   border-radius: 3px;
 }
 
-/* Toggle list: inset hover pills, scrolls below search */
+/* Toggle list: inset hover pills. No scroll pane of its own — the list renders
+   at full height and the popup sizes to it. */
 ul#toggles {
   flex: 1;
   min-height: 0;
-  max-height: 294px;
-  overflow-y: auto;
   list-style: none;
   padding: 5px;
   margin: 0;
-  scrollbar-width: thin;
-  scrollbar-color: var(--track) transparent;
-}
-
-ul#toggles::-webkit-scrollbar {
-  width: 8px;
-}
-
-ul#toggles::-webkit-scrollbar-thumb {
-  background: var(--track);
-  border-radius: 999px;
-  border: 2px solid var(--bg);
 }
 
 .no-results {
