@@ -612,7 +612,7 @@
         id: "option-sets",
         label: "Option Sets",
         containerId: CONTAINER_ID,
-        order: 10,
+        order: 20,
         mount,
       });
     },

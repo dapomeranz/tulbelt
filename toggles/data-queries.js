@@ -47,6 +47,14 @@
     result: null,
     confirmDeleteId: null,
     savedFlash: "",
+    exporting: false,
+    exportCount: 0, // records fetched so far, for the in-progress readout
+    cancelExport: false,
+    // The point of this page is grabbing a saved query and seeing rows, so the
+    // builder starts folded away on every query you open — filters are the
+    // exception, not the entry point.
+    optionsOpen: false,
+    importing: false,
   };
 
   // ── Session ─────────────────────────────────────────────────────────────────
@@ -203,22 +211,37 @@
     return err.message || String(err);
   }
 
-  async function run({ reloadSchema = false } = {}) {
+  // The front half of both Run and Export: settle on a table id and prove the
+  // builder rows compile. Returns "" after putting the reason on screen.
+  function prepare() {
     const tableId = parseTableId(state.query.tableId);
     if (!tableId) {
       state.error = "That doesn't look like a table id. Paste the id itself or the table's URL.";
       state.result = null;
       render();
-      return;
+      return "";
     }
     state.query.tableId = tableId;
 
-    const { search, error } = model.queryToParams({ ...state.query, columnTypes: state.columnTypes });
+    const { error } = paramsFor(0);
     if (error) {
       state.error = error;
       render();
-      return;
+      return "";
     }
+    return tableId;
+  }
+
+  const paramsFor = (offset) =>
+    model.queryToParams({ ...state.query, columnTypes: state.columnTypes }, { offset });
+
+  // Every response shape Tulip has handed back for a records call.
+  const recordsOf = (payload) => (Array.isArray(payload) ? payload : payload?.records || []);
+
+  async function run({ reloadSchema = false } = {}) {
+    const tableId = prepare();
+    if (!tableId) return;
+    const { search } = paramsFor(0);
 
     state.loading = true;
     state.error = "";
@@ -245,7 +268,7 @@
             "Table metadata didn't load — column names are derived from field ids, and every operator is offered since column types are unknown.";
         }
       }
-      const rows = Array.isArray(records) ? records : records?.records || [];
+      const rows = recordsOf(records);
       // With no metadata the only known columns are whatever came back.
       if (state.columns.length <= 1 + META_FIELDS.length && rows.length) {
         const discovered = [...new Set(rows.flatMap((r) => Object.keys(r)))]
@@ -253,12 +276,118 @@
           .map((name) => ({ name, label: labelFromFieldId(name), dataType: "" }));
         setColumns(discovered);
       }
-      state.result = { rows, columns: resultColumns(rows), truncated: rows.length >= (state.query.limit ?? 50) };
+      state.result = {
+        rows,
+        columns: resultColumns(rows),
+        truncated: rows.length >= model.normalizeLimit(state.query.limit),
+      };
     } catch (err) {
       state.error = explainFailure(err);
       state.result = null;
     } finally {
       state.loading = false;
+      render();
+    }
+  }
+
+  // ── CSV export ──────────────────────────────────────────────────────────────
+
+  // A runaway guard, not a policy: 100k records is already far past what a
+  // spreadsheet wants, and a query that somehow never returns an empty page
+  // shouldn't be able to loop forever.
+  const EXPORT_PAGE_CAP = 1000;
+
+  // RFC 4180. Quote anything holding a comma, a quote, or a newline, and double
+  // up the quotes inside. Objects go in as JSON, which is how the grid shows
+  // them too.
+  function csvValue(value) {
+    if (value == null) return "";
+    const text = typeof value === "object" ? JSON.stringify(value) : String(value);
+    return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+  }
+
+  // CRLF and a leading BOM: what Excel needs to read UTF-8 without mangling it,
+  // and what every other tool ignores harmlessly.
+  function csvFrom(rows, columns) {
+    const lines = [columns.map((c) => csvValue(c.label)).join(",")];
+    for (const row of rows) lines.push(columns.map((c) => csvValue(row[c.key])).join(","));
+    return `\uFEFF${lines.join("\r\n")}\r\n`;
+  }
+
+  function csvFilename(tableId, count) {
+    const base =
+      (state.tableName || tableId).replace(/[^A-Za-z0-9]+/g, "-").replace(/^-+|-+$/g, "") || "table";
+    return `${base}-${new Date().toISOString().slice(0, 10)}-${count}-records.csv`;
+  }
+
+  // A blob URL rather than a data: URI — a full-table export runs to megabytes,
+  // well past what a URL will carry.
+  function downloadFile(text, filename, type) {
+    const url = URL.createObjectURL(new Blob([text], { type }));
+    const a = el("a");
+    a.href = url;
+    a.download = filename;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    // Chrome needs the URL alive through the click; free it on the next turn.
+    setTimeout(() => URL.revokeObjectURL(url), 0);
+  }
+
+  // Export walks the same query the grid ran, one page at a time, until a page
+  // comes back empty — Run only ever shows the first page, so this is the only
+  // way to get the whole answer out. Each page is a separate request carrying
+  // the session's own credentials, exactly like Run.
+  async function exportCsv() {
+    const tableId = prepare();
+    if (!tableId) return;
+
+    state.exporting = true;
+    state.cancelExport = false;
+    state.exportCount = 0;
+    state.error = "";
+    state.hint = "";
+    state.savedFlash = "";
+    render();
+
+    const rows = [];
+    let stoppedShort = "";
+    try {
+      for (let page = 0; ; page += 1) {
+        if (state.cancelExport) {
+          stoppedShort = "Export cancelled — the file holds the pages already fetched.";
+          break;
+        }
+        if (page >= EXPORT_PAGE_CAP) {
+          stoppedShort = `Stopped after ${EXPORT_PAGE_CAP} pages — the file holds what was fetched. Narrow the query to get the rest.`;
+          break;
+        }
+        const { search } = paramsFor(page * model.normalizeLimit(state.query.limit));
+        const batch = recordsOf(await fetchRecords(tableId, search));
+        if (batch.length === 0) break;
+        rows.push(...batch);
+        state.exportCount = rows.length;
+        render();
+      }
+
+      if (rows.length === 0) {
+        state.hint = stoppedShort || "Nothing to export — the query matched no records.";
+        return;
+      }
+      downloadFile(
+        csvFrom(rows, resultColumns(rows)),
+        csvFilename(tableId, rows.length),
+        "text/csv;charset=utf-8"
+      );
+      state.savedFlash = `Exported ${rows.length} record${rows.length === 1 ? "" : "s"} to CSV.`;
+      if (stoppedShort) state.hint = stoppedShort;
+    } catch (err) {
+      state.error = `${explainFailure(err)}${
+        rows.length ? ` — gave up after ${rows.length} records, nothing was downloaded.` : ""
+      }`;
+    } finally {
+      state.exporting = false;
+      state.cancelExport = false;
       render();
     }
   }
@@ -293,7 +422,7 @@
     render();
   }
 
-  function loadSaved(id) {
+  function loadSaved(id, flash = "") {
     const saved = state.store.queries.find((q) => q.id === id);
     if (!saved) return;
     state.query = model.fromSaved(saved);
@@ -302,11 +431,18 @@
     state.hint = "";
     state.savedFlash = "";
     state.confirmDeleteId = null;
+    state.importing = false;
+    state.optionsOpen = false;
     // A different table means the columns in hand no longer describe it.
     state.columns = [];
     state.columnTypes = {};
     state.tableName = "";
-    run({ reloadSchema: true });
+    // The run clears the flash on its way through, so it lands afterwards.
+    run({ reloadSchema: true }).then(() => {
+      if (!flash) return;
+      state.savedFlash = flash;
+      render();
+    });
   }
 
   function newQuery() {
@@ -315,6 +451,8 @@
     state.error = "";
     state.savedFlash = "";
     state.confirmDeleteId = null;
+    state.importing = false;
+    state.optionsOpen = false;
     render();
   }
 
@@ -421,8 +559,37 @@
     return wrap;
   }
 
+  // A one-line read of what is folded away, so the collapsed state still says
+  // what the query does.
+  function optionsSummary() {
+    const filters = state.query.rows.filter((r) => r.field).length;
+    const sorts = state.query.sortOptions
+      .map((o) => `${labelFor(o.sortBy)} ${o.sortDir === "asc" ? "↑" : "↓"}`)
+      .join(", ");
+    return [
+      filters === 0 ? "no filters" : `${filters} filter${filters === 1 ? "" : "s"}`,
+      sorts ? `sorted by ${sorts}` : "unsorted",
+    ].join(" · ");
+  }
+
   function renderBuilder() {
     const box = el("section", "dq-builder");
+
+    // Name. Up top because it is the query's identity, and because naming it is
+    // what turns a one-off into something the list can hand back later.
+    const nameInput = el("input", "dq-input dq-name");
+    nameInput.type = "text";
+    nameInput.placeholder = "Name this query";
+    nameInput.value = state.query.name;
+    nameInput.setAttribute("aria-label", "Query name");
+    // No re-render on input — that would drop the caret mid-name. The Save
+    // button re-reads the name on click, so it stays in step without one.
+    nameInput.addEventListener("input", () => {
+      state.query.name = nameInput.value;
+      const save = box.querySelector(".dq-btn-save");
+      if (save) save.disabled = !nameInput.value.trim();
+    });
+    box.appendChild(nameInput);
 
     // Table id.
     const tableRow = el("div", "dq-table-row");
@@ -457,6 +624,23 @@
       return box;
     }
 
+    // Filters and sort, folded away by default.
+    const disclosure = el("button", "dq-disclosure");
+    disclosure.type = "button";
+    disclosure.setAttribute("aria-expanded", String(state.optionsOpen));
+    disclosure.appendChild(el("span", "dq-caret", state.optionsOpen ? "▾" : "▸"));
+    disclosure.appendChild(el("span", null, "Filters & sort"));
+    disclosure.appendChild(el("span", "dq-disclosure-meta", optionsSummary()));
+    disclosure.addEventListener("click", () => {
+      state.optionsOpen = !state.optionsOpen;
+      render();
+    });
+    box.appendChild(disclosure);
+
+    const opts = el("div", "dq-options");
+    if (!state.optionsOpen) opts.hidden = true;
+    box.appendChild(opts);
+
     // Filters.
     const filterHead = el("div", "dq-section-head");
     filterHead.appendChild(el("span", null, "Match"));
@@ -471,14 +655,14 @@
       )
     );
     filterHead.appendChild(el("span", null, "of these filters:"));
-    box.appendChild(filterHead);
+    opts.appendChild(filterHead);
 
     const filters = el("div", "dq-rows");
     state.query.rows.forEach((row, i) => filters.appendChild(renderFilterRow(row, i)));
     if (state.query.rows.length === 0) {
       filters.appendChild(el("p", "dq-hint", "No filters — every record is returned."));
     }
-    box.appendChild(filters);
+    opts.appendChild(filters);
 
     const addFilter = el("button", "dq-btn dq-btn-small", "+ Add filter");
     addFilter.type = "button";
@@ -486,16 +670,16 @@
       state.query.rows.push({ field: "", functionType: "", value: "" });
       render();
     });
-    box.appendChild(addFilter);
+    opts.appendChild(addFilter);
 
     // Sort.
-    box.appendChild(el("div", "dq-section-head", "Sort by:"));
+    opts.appendChild(el("div", "dq-section-head", "Sort by:"));
     const sorts = el("div", "dq-rows");
     state.query.sortOptions.forEach((s, i) => sorts.appendChild(renderSortRow(s, i)));
     if (state.query.sortOptions.length === 0) {
       sorts.appendChild(el("p", "dq-hint", "Unsorted — Tulip's default order."));
     }
-    box.appendChild(sorts);
+    opts.appendChild(sorts);
 
     const addSort = el("button", "dq-btn dq-btn-small", "+ Add sort");
     addSort.type = "button";
@@ -503,50 +687,123 @@
       state.query.sortOptions.push({ sortBy: state.columns[0].name, sortDir: "desc" });
       render();
     });
-    box.appendChild(addSort);
+    opts.appendChild(addSort);
 
-    // Limit + actions.
+    // Actions.
     const actions = el("div", "dq-actions");
-    const limitLabel = el("label", "dq-limit");
-    limitLabel.appendChild(el("span", null, "Limit"));
-    const limitInput = el("input", "dq-input dq-limit-input");
-    limitInput.type = "number";
-    limitInput.min = "1";
-    limitInput.max = "1000";
-    limitInput.value = String(state.query.limit ?? model.DEFAULT_LIMIT);
-    limitInput.addEventListener("input", () => {
-      const n = Number(limitInput.value);
-      state.query.limit = Number.isFinite(n) && n > 0 ? Math.min(n, 1000) : model.DEFAULT_LIMIT;
-    });
-    limitLabel.appendChild(limitInput);
-    actions.appendChild(limitLabel);
 
-    const runBtn = el("button", "dq-btn dq-btn-primary", state.loading ? "Running…" : "Run");
+    const runBtn = el(
+      "button",
+      "dq-btn dq-btn-primary",
+      state.loading ? "Running…" : `Run (first ${model.normalizeLimit(state.query.limit)})`
+    );
     runBtn.type = "button";
-    runBtn.disabled = state.loading;
+    runBtn.disabled = state.loading || state.exporting;
     runBtn.addEventListener("click", () => run());
     actions.appendChild(runBtn);
 
-    const saveBtn = el("button", "dq-btn", state.query.id ? "Save" : "Save query");
+    const exportBtn = el("button", "dq-btn", state.exporting ? "Exporting…" : "Export CSV");
+    exportBtn.type = "button";
+    exportBtn.title = "Page through every matching record and download them all as a CSV";
+    exportBtn.disabled = state.loading || state.exporting;
+    exportBtn.addEventListener("click", exportCsv);
+    actions.appendChild(exportBtn);
+
+    if (state.exporting) {
+      actions.appendChild(el("span", "dq-note", `${state.exportCount} fetched…`));
+      const cancelBtn = el("button", "dq-btn dq-btn-small", "Cancel");
+      cancelBtn.type = "button";
+      // Takes effect between pages; the request already in flight still lands.
+      cancelBtn.addEventListener("click", () => {
+        state.cancelExport = true;
+      });
+      actions.appendChild(cancelBtn);
+    }
+
+    const saveBtn = el("button", "dq-btn dq-btn-save", state.query.id ? "Save" : "Save query");
     saveBtn.type = "button";
     saveBtn.disabled = !state.query.name.trim();
+    saveBtn.title = state.query.name.trim() ? "" : "Name the query up top to save it";
     saveBtn.addEventListener("click", saveCurrent);
-
-    const nameInput = el("input", "dq-input dq-name");
-    nameInput.type = "text";
-    nameInput.placeholder = "Name this query";
-    nameInput.value = state.query.name;
-    nameInput.setAttribute("aria-label", "Query name");
-    // No re-render on input — that would drop the caret mid-name.
-    nameInput.addEventListener("input", () => {
-      state.query.name = nameInput.value;
-      saveBtn.disabled = !nameInput.value.trim();
-    });
-    actions.appendChild(nameInput);
     actions.appendChild(saveBtn);
 
     box.appendChild(actions);
     return box;
+  }
+
+  // ── Share a query ───────────────────────────────────────────────────────────
+
+  // Same trade as the option-sets export: JSON on the clipboard, not a file.
+  // A query is small, and pasting into chat is how these actually travel.
+  function copyQuery(saved, btn) {
+    const text = JSON.stringify(model.toPortable(saved), null, 2);
+    navigator.clipboard.writeText(text).then(
+      () => {
+        const was = btn.textContent;
+        btn.textContent = "✓";
+        setTimeout(() => {
+          if (btn.isConnected) btn.textContent = was;
+        }, 1500);
+      },
+      (err) => {
+        state.error = `Couldn't copy to clipboard: ${err.message}`;
+        render();
+      }
+    );
+  }
+
+  function renderImportForm() {
+    const form = el("section", "dq-builder");
+    form.appendChild(el("h2", "dq-import-head", "Import queries"));
+    form.appendChild(
+      el(
+        "p",
+        "dq-hint",
+        "Paste an export from another Tulbelt user. Imported queries are added alongside your existing ones — a name already in use gets a number."
+      )
+    );
+
+    const error = el("div", "dq-banner");
+    error.style.display = "none";
+    form.appendChild(error);
+
+    const text = el("textarea", "dq-input dq-import-text");
+    text.rows = 10;
+    text.spellcheck = false;
+    text.placeholder = '{ "tulbelt": "data-queries", ... }';
+    form.appendChild(text);
+
+    const actions = el("div", "dq-actions");
+    const doImport = el("button", "dq-btn dq-btn-primary", "Import");
+    doImport.type = "button";
+    doImport.addEventListener("click", () => {
+      const result = model.parseImport(text.value);
+      if (result.error) {
+        // No re-render — keep the pasted text so the user can fix it in place.
+        error.textContent = result.error;
+        error.style.display = "";
+        return;
+      }
+      for (const q of result.queries) {
+        q.name = model.uniqueName(state.store, q.name);
+        model.upsertQuery(state.store, q);
+      }
+      persist();
+      state.importing = false;
+      const n = result.queries.length;
+      // Land on the first import rather than making the user hunt for it.
+      loadSaved(result.queries[0].id, `Imported ${n} quer${n === 1 ? "y" : "ies"}.`);
+    });
+    const cancel = el("button", "dq-btn", "Cancel");
+    cancel.type = "button";
+    cancel.addEventListener("click", () => {
+      state.importing = false;
+      render();
+    });
+    actions.appendChild(doImport);
+    actions.appendChild(cancel);
+    form.appendChild(actions);
+    return form;
   }
 
   // ── Saved query list ────────────────────────────────────────────────────────
@@ -554,10 +811,22 @@
   function renderSaved() {
     const panel = el("aside", "dq-saved");
 
+    const tools = el("div", "dq-saved-tools");
     const newBtn = el("button", "dq-btn dq-btn-primary", "+ New query");
     newBtn.type = "button";
     newBtn.addEventListener("click", newQuery);
-    panel.appendChild(newBtn);
+    tools.appendChild(newBtn);
+
+    const importBtn = el("button", "dq-btn", "Import");
+    importBtn.type = "button";
+    importBtn.title = "Paste queries exported from another Tulbelt user";
+    importBtn.addEventListener("click", () => {
+      state.importing = true;
+      state.confirmDeleteId = null;
+      render();
+    });
+    tools.appendChild(importBtn);
+    panel.appendChild(tools);
 
     if (state.store.queries.length === 0) {
       panel.appendChild(el("p", "dq-hint", "No saved queries yet. Build one, name it, and hit Save."));
@@ -598,6 +867,12 @@
         row.appendChild(yes);
         row.appendChild(no);
       } else {
+        const share = el("button", "dq-btn dq-btn-icon", "⧉");
+        share.type = "button";
+        share.title = `Copy “${q.name}” as JSON to share`;
+        share.addEventListener("click", () => copyQuery(q, share));
+        row.appendChild(share);
+
         const del = el("button", "dq-btn dq-btn-icon", "×");
         del.type = "button";
         del.title = `Delete “${q.name}”`;
@@ -656,7 +931,15 @@
     summary.appendChild(
       el("span", "dq-count", count === 0 ? "No records" : `${count} record${count === 1 ? "" : "s"}`)
     );
-    if (result.truncated) summary.appendChild(el("span", "dq-note", "limit reached — raise it to see more"));
+    if (result.truncated) {
+      summary.appendChild(
+        el(
+          "span",
+          "dq-note",
+          `first ${model.normalizeLimit(state.query.limit)} shown — Export CSV for every match`
+        )
+      );
+    }
     wrap.appendChild(summary);
 
     if (count === 0) {
@@ -700,6 +983,12 @@
     layout.appendChild(renderSaved());
 
     const main = el("div", "dq-main");
+    if (state.importing) {
+      main.appendChild(renderImportForm());
+      layout.appendChild(main);
+      root.appendChild(layout);
+      return;
+    }
     main.appendChild(renderBuilder());
     if (state.error) main.appendChild(el("div", "dq-banner", state.error));
     if (state.hint) main.appendChild(el("div", "dq-note-banner", state.hint));
@@ -753,9 +1042,18 @@
       #${CONTAINER_ID} .dq-btn-small { align-self: flex-start; margin-top: 6px; padding: 4px 10px; font-size: 0.9em; }
       #${CONTAINER_ID} .dq-btn-icon { padding: 4px 8px; line-height: 1.2; }
       #${CONTAINER_ID} .dq-actions { display: flex; gap: 8px; align-items: center; margin-top: 16px; padding-top: 12px; border-top: 1px solid #e8edf5; flex-wrap: wrap; }
-      #${CONTAINER_ID} .dq-limit { display: flex; gap: 6px; align-items: center; font-size: 0.9em; color: #45526b; }
-      #${CONTAINER_ID} .dq-limit-input { width: 72px; }
-      #${CONTAINER_ID} .dq-name { flex: 1 1 auto; min-width: 120px; max-width: 260px; margin-left: auto; }
+      #${CONTAINER_ID} .dq-name { display: block; width: 100%; max-width: 420px; box-sizing: border-box; margin-bottom: 10px; font-size: 1.15em; font-weight: 600; }
+      #${CONTAINER_ID} .dq-name::placeholder { font-weight: 400; color: #aab2bf; }
+      #${CONTAINER_ID} .dq-disclosure { display: flex; gap: 8px; align-items: baseline; width: 100%; margin-top: 14px; padding: 8px 10px; border: 1px solid #d5dae2; border-radius: 6px; background: #f6f8fb; color: inherit; font: inherit; font-weight: 600; text-align: left; cursor: pointer; }
+      #${CONTAINER_ID} .dq-disclosure:hover { border-color: #1c69e1; }
+      #${CONTAINER_ID} .dq-caret { color: #788293; }
+      #${CONTAINER_ID} .dq-disclosure-meta { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 400; font-size: 0.9em; color: #788293; }
+      #${CONTAINER_ID} .dq-options { display: block; padding-left: 2px; }
+      #${CONTAINER_ID} .dq-options[hidden] { display: none; }
+      #${CONTAINER_ID} .dq-saved-tools { display: flex; gap: 6px; }
+      #${CONTAINER_ID} .dq-saved-tools .dq-btn { flex: 1 1 auto; }
+      #${CONTAINER_ID} .dq-import-head { margin: 0 0 6px; font-size: 1.1em; }
+      #${CONTAINER_ID} .dq-import-text { width: 100%; box-sizing: border-box; resize: vertical; font-family: ui-monospace, Menlo, monospace; font-size: 0.85em; }
       #${CONTAINER_ID} .dq-hint { color: #788293; margin: 6px 0; }
       #${CONTAINER_ID} .dq-result { margin-top: 18px; }
       #${CONTAINER_ID} .dq-summary { display: flex; gap: 10px; align-items: baseline; margin-bottom: 8px; }
@@ -790,6 +1088,7 @@
     const { store, error } = model.loadStore();
     state.store = store;
     state.storeError = error || "";
+    state.importing = false;
     if (!state.query) state.query = model.emptyQuery(store.lastTableId);
     render();
   }
@@ -800,7 +1099,7 @@
         id: "data-queries",
         label: "Data Queries",
         containerId: CONTAINER_ID,
-        order: 20,
+        order: 10,
         mount,
       });
     },

@@ -22,7 +22,17 @@
 (() => {
   const LS_KEY = "tulbelt-data-queries";
   const STORE_VERSION = 1;
-  const DEFAULT_LIMIT = 50;
+  // Every request asks for a full page of 100. The page used to carry a Limit
+  // box; it was a foot-gun — a small limit silently truncates the answer, and
+  // there is nothing a smaller page buys you. 100 is both the default and the
+  // floor, so a query saved by an older build with `limit: 50` reads back as
+  // 100. A hand-written query asking for more still gets what it asked for.
+  const PAGE_LIMIT = 100;
+
+  function normalizeLimit(limit) {
+    const n = Number(limit);
+    return Number.isFinite(n) && n > PAGE_LIMIT ? Math.floor(n) : PAGE_LIMIT;
+  }
 
   // ── Filter vocabulary ───────────────────────────────────────────────────────
 
@@ -134,7 +144,7 @@
       rows: [], // builder rows; compiled to Filter[] on run
       filterAggregator: "all",
       sortOptions: [{ sortBy: "_createdAt", sortDir: "desc" }],
-      limit: DEFAULT_LIMIT,
+      limit: PAGE_LIMIT,
     };
   }
 
@@ -163,7 +173,7 @@
     if (error) return { error };
 
     const params = {
-      limit: query.limit ?? DEFAULT_LIMIT,
+      limit: normalizeLimit(query.limit),
       offset,
       filterAggregator: query.filterAggregator || "all",
     };
@@ -194,7 +204,7 @@
       filters,
       filterAggregator: query.filterAggregator || "all",
       sortOptions: query.sortOptions || [],
-      limit: query.limit ?? DEFAULT_LIMIT,
+      limit: normalizeLimit(query.limit),
       rows: query.rows || [],
       createdAt: query.createdAt || now,
       updatedAt: now,
@@ -209,7 +219,7 @@
       rows: Array.isArray(saved.rows) ? saved.rows.map((r) => ({ ...r })) : rowsFromFilters(saved.filters),
       filterAggregator: saved.filterAggregator || "all",
       sortOptions: Array.isArray(saved.sortOptions) ? saved.sortOptions.map((s) => ({ ...s })) : [],
-      limit: saved.limit ?? DEFAULT_LIMIT,
+      limit: normalizeLimit(saved.limit),
       createdAt: saved.createdAt,
     };
   }
@@ -223,6 +233,109 @@
       functionType: f.functionType,
       value: Array.isArray(f.arg) ? f.arg.join(", ") : f.arg == null ? "" : String(f.arg),
     }));
+  }
+
+  // ── Share format (import / export) ──────────────────────────────────────────
+
+  // One saved query, as a portable payload — the same idea as the option-sets
+  // export: a small JSON blob you can paste to a colleague. Internal ids and
+  // timestamps are local bookkeeping, so they are stripped here and minted
+  // fresh on import; `queries` is an array so several can travel together even
+  // though the UI exports one at a time.
+  const SHARE_KIND = "data-queries";
+
+  function toPortable(saved) {
+    return {
+      tulbelt: SHARE_KIND,
+      version: 1,
+      queries: [
+        {
+          name: saved.name,
+          tableId: saved.tableId,
+          filters: saved.filters || [],
+          filterAggregator: saved.filterAggregator || "all",
+          sortOptions: saved.sortOptions || [],
+          limit: normalizeLimit(saved.limit),
+          rows: saved.rows || [],
+        },
+      ],
+    };
+  }
+
+  // Returns { queries } ready to store, or { error } with nothing changed.
+  // Unknown fields are ignored and version > 1 is accepted, so a payload from a
+  // newer Tulbelt still imports as long as the shape checks pass.
+  function parseImport(text) {
+    if (!String(text || "").trim()) return { error: "Nothing to import." };
+
+    let parsed;
+    try {
+      parsed = JSON.parse(text);
+    } catch (err) {
+      return { error: `Not valid JSON (${err.message}).` };
+    }
+    if (!parsed || parsed.tulbelt !== SHARE_KIND) {
+      return { error: "This doesn't look like a Tulbelt data queries export." };
+    }
+
+    // A single-query payload is the common hand-edited shape; accept it too.
+    const list = Array.isArray(parsed.queries)
+      ? parsed.queries
+      : parsed.query
+      ? [parsed.query]
+      : null;
+    if (!list) return { error: "This export has no queries in it." };
+
+    const now = Date.now();
+    const queries = [];
+    for (const raw of list) {
+      if (!raw || typeof raw.name !== "string" || !raw.name.trim()) {
+        return { error: "Every query in the export needs a name." };
+      }
+      if (typeof raw.tableId !== "string" || !raw.tableId.trim()) {
+        return { error: `Query "${raw.name}" has no table id.` };
+      }
+      if (raw.filters != null && !Array.isArray(raw.filters)) {
+        return { error: `Query "${raw.name}" has a filters field that isn't a list.` };
+      }
+      const filters = Array.isArray(raw.filters) ? raw.filters : [];
+      for (const f of filters) {
+        if (!f || typeof f.field !== "string" || !OPERATOR_BY_ID.has(f.functionType)) {
+          return { error: `Query "${raw.name}" has a filter this build doesn't understand.` };
+        }
+      }
+      queries.push({
+        id: newId("q"),
+        name: raw.name.trim(),
+        tableId: raw.tableId.trim(),
+        filters,
+        filterAggregator: raw.filterAggregator === "any" ? "any" : "all",
+        sortOptions: Array.isArray(raw.sortOptions)
+          ? raw.sortOptions
+              .filter((o) => o && typeof o.sortBy === "string")
+              .map((o) => ({ sortBy: o.sortBy, sortDir: o.sortDir === "asc" ? "asc" : "desc" }))
+          : [],
+        limit: normalizeLimit(raw.limit),
+        // Builder rows are a UI convenience; rebuild them when absent so an
+        // imported query is still editable rather than read-only.
+        rows: Array.isArray(raw.rows) ? raw.rows.map((r) => ({ ...r })) : rowsFromFilters(filters),
+        createdAt: now,
+        updatedAt: now,
+      });
+    }
+    return { queries };
+  }
+
+  // Two people importing the same query shouldn't end up with one entry each
+  // time — but neither should an import quietly overwrite a local edit. A name
+  // already in use gets a numeric suffix, the way a duplicated file does.
+  function uniqueName(store, name) {
+    const taken = new Set(store.queries.map((q) => q.name));
+    if (!taken.has(name)) return name;
+    for (let n = 2; ; n += 1) {
+      const candidate = `${name} (${n})`;
+      if (!taken.has(candidate)) return candidate;
+    }
   }
 
   // ── Storage (tenant-origin localStorage) ────────────────────────────────────
@@ -284,7 +397,8 @@
 
   window.__tulbeltDataQueriesModel = {
     LS_KEY,
-    DEFAULT_LIMIT,
+    PAGE_LIMIT,
+    normalizeLimit,
     OPERATORS,
     OPERATOR_BY_ID,
     familyForType,
@@ -300,6 +414,9 @@
     emptyStore,
     loadStore,
     saveStore,
+    toPortable,
+    parseImport,
+    uniqueName,
     upsertQuery,
     removeQuery,
   };

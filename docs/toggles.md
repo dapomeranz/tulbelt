@@ -78,7 +78,11 @@ see [the shared page shell](#the-tulbelt-page-shell) below). Paste a table id �
 columns, then build a query against them and save it under a name.
 
 **The builder.** Filter rows are *field · operator · value*, matched on **all**
-or **any**; plus sort rows and a row limit. The operators offered for a column
+or **any**, plus sort rows. The query's name sits at the top of the builder, and
+the filter and sort rows are folded behind a **Filters & sort** disclosure that
+starts collapsed on every query you open — the common errand here is grabbing a
+saved query and reading rows, not editing one, so the summary line
+(`3 filters · sorted by Created ↓`) is usually all you need. The operators offered for a column
 are narrowed by its `dataType` — a text column gets `contains`/`startsWith`, a
 number or timestamp gets the comparisons, and an unrecognised type gets all
 sixteen rather than hiding the one you needed. `is any of` / `is none of` take a
@@ -86,12 +90,42 @@ comma-separated list and are sent as a JSON array. `is blank` / `is not blank`
 take no value at all. Rows with no field chosen are ignored, so a half-filled
 row never blocks a run.
 
-**Saved queries** are listed down the left: click one to load and run it, `×` to
-delete (with a confirm step). Saving requires a name; saving again under the
-same name updates in place rather than duplicating. They live in the tenant's
+**The page size is fixed at 100** and is not adjustable. There was a Limit box;
+it was a foot-gun — a small limit silently truncates the answer, and nothing is
+bought by asking for less. **Run** always shows the first 100 matches; when it
+fills the page it says so and points at the export. A query hand-written with a
+larger `limit` still gets what it asked for: 100 is a floor, not a ceiling.
+
+**Export CSV** is how you get the whole answer out. It re-runs the *same* query
+you built and walks it page by page — `offset` 0, 100, 200, … — until a page
+comes back empty, then downloads the union of every page as a CSV. Columns are
+the union across all rows fetched (records omit fields they have no value for),
+values are RFC 4180-escaped, objects are written as JSON, and the file is CRLF
+with a UTF-8 BOM so Excel opens it without mangling. Progress shows the running
+count and a **Cancel** that takes effect between pages. A cap of 1000 pages
+(100k records) stops a runaway; hitting it says so rather than pretending the
+file is complete. Every page is a separate request on the session's own
+credentials, exactly like Run.
+
+**Saved queries** are listed down the left: click one to load and run it, `⧉` to
+copy it as JSON for sharing, `×` to delete (with a confirm step). Saving
+requires a name; saving again under the same name updates in place rather than
+duplicating. They live in the tenant's
 `localStorage` under `tulbelt-data-queries` — per browser, per Tulip instance,
 never shared. That key previously held a bare table id; that value is migrated
 to `lastTableId` on first read.
+
+**Import / export** works the way [option sets](#option-sets-builder--option-sets-builder--default-on)
+do — JSON on the clipboard rather than a file, because a query is small and
+pasting into chat is how these actually travel. `⧉` on a saved query copies a
+`{ "tulbelt": "data-queries", version: 1, queries: [ … ] }` payload with the
+local id and timestamps stripped; **Import** takes a pasted payload, mints fresh
+ids, and adds the queries alongside your existing ones — a name already in use
+gets a numeric suffix rather than overwriting. `queries` is an array so several
+can travel together even though the UI exports one at a time, a bare `query` is
+accepted too, and a `version` from a newer Tulbelt still imports as long as the
+shape checks pass. A filter naming an operator this build doesn't know is
+rejected with a reason, not silently dropped.
 
 **Replicated types.** `toggles/data-queries-model.js` holds the whole query
 vocabulary — the 16-member `FilterFunctionType`, `Filter`, `SortOption`,
@@ -523,6 +557,7 @@ choice, and the Back bar already says Tulbelt. Turning off the toggle for the ta
 you're currently looking at falls back to the first remaining tab (and takes the
 URL with it) rather than leaving an empty panel.
 
-Current pages: [Option Sets](#option-sets-builder--option-sets-builder--default-on)
-(`order: 10`) and [Data queries](#data-queries--data-queries--default-off)
-(`order: 20`).
+Current pages: [Data queries](#data-queries--data-queries--default-off)
+(`order: 10`) and [Option Sets](#option-sets-builder--option-sets-builder--default-on)
+(`order: 20`). Data Queries leads, so it is also the tab the page opens on when
+no tab is named in the URL.
