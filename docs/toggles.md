@@ -260,16 +260,30 @@ button into the top toolbar.
 
 ### Option Sets builder — `option-sets-builder` · **default: on**
 
-On `/account/*` pages, adds an **Option Sets** item to the Account Settings
-sidebar. Clicking it shows a Tulbelt-owned page at the fake URL
-`/account/option-sets`: the URL is set with `history.pushState`, which React
-Router never observes, so Tulip's header and sidebar stay real while the
-content pane is hidden and replaced with our container. The "selected" nav
-style is copied from whichever real item currently has it (detected as the
-minority className — hashes are never hardcoded). Clicking any real link
-deactivates and `replaceState`s back to the last real settings path so the
-router and URL agree; back/forward and hard reloads on the fake URL re-activate
-over whatever Tulip renders.
+Adds a **Tulbelt** item to the account dropdown (the menu with My profile /
+Sign out), anchored on `li[data-testid="my-profile-menuitem"]` and placed above
+Sign out. That menu is the only entry point on purpose: the account settings
+pages aren't available to every user, so nothing here hangs off the settings
+sidebar. The clone carries no React fiber, so Tulip's delegated handlers never
+fire for it, and the click dispatches a synthetic Escape *from the link* (React
+delegates from its root container, so an event fired on `document` would never
+reach the popup) to dismiss the menu.
+
+Clicking it shows a Tulbelt-owned page at the fake URL `/tulbelt/option-sets`:
+a fixed full-window panel appended to `<body>` with its own Back bar and tab
+strip, owing nothing to Tulip's layout so it renders identically at any
+permission level. The tab strip is driven by the `TABS` array — Option Sets is
+the only tab today, and a second one is an entry there plus a branch in
+`buildContainer`/`render`. Tab switches `replaceState` so Back leaves Tulbelt
+rather than walking tabs. The URL is set with `history.pushState`, which React
+Router never observes, so Tulip keeps rendering whatever it had underneath.
+
+The panel covers the app, so Back (or Escape, unless focus is in a field) is
+the only way out: it pops our own history entry when we pushed one, otherwise
+it navigates to the last real path. Hard reloads on the fake URL re-activate;
+because it's a route Tulip doesn't know, its router may redirect out from under
+us shortly after load, so for 5s we reclaim the URL with `replaceState` and
+keep the redirect target as the exit path.
 
 The page is a master–detail builder for named option sets typed as Text,
 Integer, or Number (type fixed at creation). Options are ordered rows —

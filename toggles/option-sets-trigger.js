@@ -198,15 +198,15 @@
 
     const sets = loadSets();
     if (sets.length === 0) {
-      // Nothing to pick from — offer the builder page instead (it survives a
-      // cold load of the fake URL, so a new tab works).
+      // Nothing to pick from — offer the builder page instead. It survives a
+      // cold load of the fake URL, so a new tab works.
       const configure = document.createElement("button");
       configure.type = "button";
       configure.setAttribute(PICKER_ATTR, "configure");
       configure.textContent = "No option sets yet — configure…";
-      configure.title = "Opens the Option Sets builder (Account Settings) in a new tab";
+      configure.title = "Opens Tulbelt's Option Sets page in a new tab (also in the account menu)";
       configure.addEventListener("click", () => {
-        window.open("/account/option-sets", "_blank");
+        window.open("/tulbelt/option-sets", "_blank");
       });
       proxy.after(configure);
       return;

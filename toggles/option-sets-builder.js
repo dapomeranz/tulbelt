@@ -1,30 +1,37 @@
-// Adds an "Option Sets" item to the Account Settings sidebar that shows a
-// Tulbelt-owned page at the fake URL /account/option-sets. Tulip's header and
-// sidebar stay real; only the content pane is swapped. The URL is pushed with
-// history.pushState, which React Router never observes — the app keeps
-// rendering the previous settings page underneath while we cover it.
+// A Tulbelt-owned page reached from the account dropdown (the menu holding
+// My profile / Sign out), which every user gets — unlike the account settings
+// pages, which a restricted user can't open at all. That's why nothing here
+// hangs off Tulip's settings sidebar.
 //
-// Styled-components class hashes are build-specific, so the "selected" nav
-// style is never hardcoded: the selected <li> is whichever className is in the
-// minority among sidebar items, and we swap that className between the real
-// item and ours.
+// The page is a fixed full-window panel appended to <body>: its own Back bar
+// and tab strip, owing nothing to Tulip's layout, so it renders the same at
+// any permission level. Option Sets is the only tab today; the strip is
+// driven by TABS so a second one is an entry in that array and nothing else.
 //
-// The page itself is the Option Sets builder: named sets of typed options
-// (text / integer / number), ordered, each with an optional description,
-// persisted to the tenant origin's localStorage under `tulbelt-option-sets`.
-// Values are stored as strings; the data type governs the input widget and
-// validation, never silent coercion.
-
+// The URL is set with history.pushState to /tulbelt/<tab>, which React Router
+// never observes — Tulip keeps rendering whatever it had underneath while we
+// cover it. Nothing else in the app can be clicked while the panel is up, so
+// Back (and Escape) is the only way out: it pops our own entry when we pushed
+// one, and otherwise navigates somewhere real. A cold load of the fake URL
+// works too (option-sets-trigger.js opens it in a new tab); Tulip's router
+// may redirect the unknown route out from under us for a moment, so we take
+// the URL back for a short window after load.
+//
 (() => {
   const { registerToggle, ensureStyles, removeStyles } = window.__tulbeltLib;
 
   const FEATURE_ID = "option-sets-builder";
-  const FAKE_PATH = "/account/option-sets";
-  const LI_ATTR = "data-tulbelt-osb-item";
-  const HIDDEN_ATTR = "data-tulbelt-osb-hidden";
+  const BASE_PATH = "/tulbelt";
+  // The whole tab strip. Adding a page means adding an entry here (plus a
+  // renderer keyed on its id in buildContainer) — nothing else.
+  const TABS = [{ id: "option-sets", label: "Option Sets", path: `${BASE_PATH}/option-sets` }];
+  const MENU_LI_ATTR = "data-tulbelt-osb-menu-item";
   const STYLE_ID = "tulbelt-osb-styles";
   const CONTAINER_ID = "tulbelt-osb-page";
+  const PANEL_ID = "tulbelt-osb-panel";
   const LS_KEY = "tulbelt-option-sets";
+  // How long after a cold load we keep reclaiming the URL from Tulip's router.
+  const COLD_LOAD_GUARD_MS = 5000;
 
   const DATA_TYPES = [
     { id: "text", label: "Text" },
@@ -34,18 +41,27 @@
 
   let enabled = false;
   let active = false;
+  let activeTabId = TABS[0].id;
   let observer = null;
   let scheduled = false;
-  // Real settings path to fall back to when leaving the fake page.
-  let lastRealPath = "/account/account";
-  // Set when the page cold-loaded on the fake URL; consumed once the sidebar
-  // exists so we can activate over whatever Tulip rendered (404 or redirect).
+  // Real Tulip path to fall back to when leaving the fake page.
+  let lastRealPath = "/";
+  // Set when the page cold-loaded on the fake URL; consumed on the first scan.
   let coldLoadWanted = false;
-  // The real <li> we demoted while active, and its original className.
-  let demotedLi = null;
-  let demotedClass = "";
+  let coldLoadGuardUntil = 0;
+  // Whether we pushed a history entry for the fake URL — decides whether Back
+  // can pop one or has to navigate somewhere real.
+  let pushedEntry = false;
 
-  const isFakePath = (p = location.pathname) => p.replace(/\/+$/, "") === FAKE_PATH;
+  const normalizePath = (p) => p.replace(/\/+$/, "") || "/";
+  const isFakePath = (p = location.pathname) => {
+    const n = normalizePath(p);
+    return n === BASE_PATH || n.startsWith(`${BASE_PATH}/`);
+  };
+  const currentTab = () => TABS.find((t) => t.id === activeTabId) || TABS[0];
+  // Bare /tulbelt (or an unknown tab) lands on the first tab.
+  const tabForPath = (p = location.pathname) =>
+    TABS.find((t) => t.path === normalizePath(p)) || TABS[0];
 
   // ── Option set data (tenant-origin localStorage) ────────────────────────────
 
@@ -572,52 +588,30 @@
 
   // ── DOM discovery ───────────────────────────────────────────────────────────
 
-  function findSettingsUl() {
-    return document.querySelector('ul a[data-testid="account"]')?.closest("ul") || null;
-  }
-
-  function navItems(ul) {
-    return [...ul.children].filter(
-      (li) => li.tagName === "LI" && li.querySelector('a[href^="/account/"]') && !li.hasAttribute(LI_ATTR)
-    );
-  }
-
-  // Selected <li> = the minority className among real sidebar items.
-  function findSelected(ul) {
-    const items = navItems(ul);
-    const counts = new Map();
-    for (const li of items) counts.set(li.className, (counts.get(li.className) || 0) + 1);
-    if (counts.size < 2) return { selected: null, selectedClass: "", unselectedClass: items[0]?.className || "" };
-    let selectedClass = "";
-    let unselectedClass = "";
-    let min = Infinity;
-    let max = -1;
-    for (const [cls, n] of counts) {
-      if (n < min) { min = n; selectedClass = cls; }
-      if (n > max) { max = n; unselectedClass = cls; }
-    }
-    return {
-      selected: items.find((li) => li.className === selectedClass) || null,
-      selectedClass,
-      unselectedClass,
-    };
-  }
-
-  // Sidebar column = first ancestor of the ul that also contains the
-  // "Account settings" <h1>. Its element siblings are the content pane.
-  function findSidebarColumn(ul) {
-    for (let node = ul.parentElement; node && node !== document.body; node = node.parentElement) {
-      if (node.querySelector("h1")) return node;
-    }
-    return null;
+  // The account dropdown — anchored on My profile, which every user gets, not
+  // on the settings entries a restricted user may be missing.
+  function findUserMenuUl() {
+    return document.querySelector('li[data-testid="my-profile-menuitem"]')?.closest("ul") || null;
   }
 
   // ── Styles / container ──────────────────────────────────────────────────────
 
   const CSS = `
-      [${HIDDEN_ATTR}] { display: none !important; }
+      #${PANEL_ID} {
+        position: fixed; inset: 0; z-index: 2147483000; display: flex; flex-direction: column;
+        background: #fff; color: #1a1f28;
+        font: 14px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      }
+      #${PANEL_ID} .osb-panel-bar { flex: 0 0 auto; display: flex; align-items: center; gap: 12px; padding: 10px 16px; background: #f6f8fb; }
+      #${PANEL_ID} .osb-panel-title { font-size: 1.15em; font-weight: 600; }
+      #${PANEL_ID} .osb-panel-brand { margin-left: auto; color: #788293; font-size: 0.85em; }
+      #${PANEL_ID} .osb-panel-back { font: inherit; padding: 6px 12px; border: 1px solid #d5dae2; border-radius: 4px; background: #fff; color: inherit; cursor: pointer; }
+      #${PANEL_ID} .osb-panel-back:hover { border-color: #1c69e1; }
+      #${PANEL_ID} .osb-tabs { flex: 0 0 auto; display: flex; gap: 4px; padding: 0 16px; background: #f6f8fb; border-bottom: 1px solid #d5dae2; }
+      #${PANEL_ID} .osb-tab { font: inherit; padding: 8px 14px; border: none; border-bottom: 2px solid transparent; background: none; color: #45526b; cursor: pointer; }
+      #${PANEL_ID} .osb-tab:hover { color: #1c69e1; }
+      #${PANEL_ID} .osb-tab-on { color: #1c69e1; border-bottom-color: #1c69e1; font-weight: 600; }
       #${CONTAINER_ID} { flex: 1 1 auto; min-width: 0; overflow: auto; padding: 24px 40px; }
-      #${CONTAINER_ID} h1 { font-size: 1.5em; margin: 0 0 16px; }
       #${CONTAINER_ID} h2 { font-size: 1.15em; margin: 0 0 12px; }
       #${CONTAINER_ID} .osb-disclaimer { background: #eef4fd; color: #45526b; border: 1px solid #c9dcf7; border-radius: 4px; padding: 8px 12px; margin-bottom: 16px; }
       #${CONTAINER_ID} .osb-banner { background: #fdecea; color: #b3261e; border: 1px solid #f5c6c2; border-radius: 4px; padding: 8px 12px; margin-bottom: 12px; }
@@ -661,11 +655,12 @@
       #${CONTAINER_ID} .osb-import-error { background: #fdecea; color: #b3261e; border: 1px solid #f5c6c2; border-radius: 4px; padding: 8px 12px; margin-bottom: 8px; }
     `;
 
+  // The active tab's content. One tab today, so this is unconditional; a
+  // second one branches on container.dataset.tab here and in render().
   function buildContainer() {
     const container = document.createElement("div");
     container.id = CONTAINER_ID;
-    const title = el("h1", "", "Option Sets");
-    container.appendChild(title);
+    container.dataset.tab = activeTabId;
     container.appendChild(
       el(
         "div",
@@ -682,65 +677,100 @@
 
   // ── Nav item ────────────────────────────────────────────────────────────────
 
-  function injectLi(ul) {
-    if (ul.querySelector(`li[${LI_ATTR}]`)) return;
-    const { selected } = findSelected(ul);
-    const template = navItems(ul).find((li) => li !== selected);
+  // The one entry point: an item in the account dropdown. The clone carries no
+  // React fiber, so Tulip's delegated handlers never fire for it — the link is
+  // entirely ours.
+  function injectMenuLi() {
+    const ul = findUserMenuUl();
+    if (!ul || ul.querySelector(`li[${MENU_LI_ATTR}]`)) return;
+    const items = [...ul.children].filter((n) => n.tagName === "LI");
+    const links = items.filter((n) => n.querySelector("a[href]"));
+    const template = links[links.length - 1];
     if (!template) return;
     const li = template.cloneNode(true);
-    li.setAttribute(LI_ATTR, "");
-    li.setAttribute("href", FAKE_PATH);
+    li.setAttribute(MENU_LI_ATTR, "");
+    li.setAttribute("data-testid", "tulbelt-menuitem");
+    // `value` is how Tulip's menu identifies a row; ours must not impersonate
+    // the one we cloned.
+    li.removeAttribute("value");
+    li.setAttribute("href", TABS[0].path);
     const a = li.querySelector("a");
-    a.setAttribute("href", FAKE_PATH);
-    a.setAttribute("data-testid", "option-sets");
-    const span = a.querySelector("span") || a;
-    span.textContent = "Option Sets";
-    a.addEventListener("click", onOwnLinkClick);
-    const after = ul.querySelector('a[data-testid="network-access"]')?.closest("li");
-    if (after) after.after(li);
+    a.setAttribute("href", TABS[0].path);
+    a.setAttribute("data-testid", "tulbelt");
+    const label = a.querySelector("span") || a;
+    label.textContent = "Tulbelt";
+    a.addEventListener("click", onMenuLinkClick);
+    // Above Sign out — the only row that is a button rather than a link.
+    const signOut = items.find((n) => !n.querySelector("a[href]"));
+    if (signOut) signOut.before(li);
     else ul.appendChild(li);
   }
 
-  function removeLi() {
-    document.querySelector(`li[${LI_ATTR}]`)?.remove();
+  function removeMenuLi() {
+    document.querySelector(`li[${MENU_LI_ATTR}]`)?.remove();
   }
 
   // ── Activate / deactivate ───────────────────────────────────────────────────
 
+  function buildPanel() {
+    const panel = document.createElement("div");
+    panel.id = PANEL_ID;
+
+    const bar = el("div", "osb-panel-bar");
+    const back = el("button", "osb-panel-back", "← Back");
+    back.type = "button";
+    back.title = "Leave Tulbelt and return to Tulip";
+    back.addEventListener("click", goBack);
+    bar.appendChild(back);
+    bar.appendChild(el("span", "osb-panel-title", "Tulbelt"));
+    bar.appendChild(el("span", "osb-panel-brand", "Browser extension — nothing here leaves this browser"));
+    panel.appendChild(bar);
+
+    const tabs = el("div", "osb-tabs");
+    tabs.setAttribute("role", "tablist");
+    for (const tab of TABS) {
+      const btn = el("button", "osb-tab", tab.label);
+      btn.type = "button";
+      btn.setAttribute("role", "tab");
+      btn.dataset.tabId = tab.id;
+      btn.addEventListener("click", () => selectTab(tab.id));
+      tabs.appendChild(btn);
+    }
+    panel.appendChild(tabs);
+    return panel;
+  }
+
   function applyActive() {
-    const ul = findSettingsUl();
-    if (!ul) return;
-    injectLi(ul);
-    const ourLi = ul.querySelector(`li[${LI_ATTR}]`);
-    if (!ourLi) return;
-
-    // Promote our item to the selected style, demote whichever real item has it.
-    const { selected, selectedClass, unselectedClass } = findSelected(ul);
-    if (selected && selectedClass) {
-      demotedLi = selected;
-      demotedClass = selected.className;
-      selected.className = unselectedClass;
-      ourLi.className = selectedClass;
+    let panel = document.getElementById(PANEL_ID);
+    if (!panel) {
+      panel = buildPanel();
+      document.body.appendChild(panel);
     }
-
-    // Hide the content pane (all element siblings of the sidebar column) and
-    // attach our page.
-    const column = findSidebarColumn(ul);
-    const parent = column?.parentElement;
-    if (parent) {
-      for (const sib of [...parent.children]) {
-        if (sib !== column && sib.id !== CONTAINER_ID) sib.setAttribute(HIDDEN_ATTR, "");
-      }
-      if (!document.getElementById(CONTAINER_ID)) {
-        parent.appendChild(buildContainer());
-        render();
-      }
+    for (const btn of panel.querySelectorAll(".osb-tab")) {
+      const on = btn.dataset.tabId === activeTabId;
+      btn.classList.toggle("osb-tab-on", on);
+      btn.setAttribute("aria-selected", on ? "true" : "false");
     }
+    const container = document.getElementById(CONTAINER_ID);
+    if (!container || container.dataset.tab !== activeTabId) {
+      container?.remove();
+      panel.appendChild(buildContainer());
+      render();
+    }
+  }
+
+  function selectTab(id) {
+    if (!TABS.some((t) => t.id === id) || activeTabId === id) return;
+    activeTabId = id;
+    // replaceState, not push: Back should leave Tulbelt, not walk the tabs.
+    history.replaceState(null, "", currentTab().path);
+    applyActive();
   }
 
   function activate() {
     if (active) return;
     if (!isFakePath()) lastRealPath = location.pathname;
+    activeTabId = tabForPath().id;
     active = true;
     ensureStyles(STYLE_ID, CSS);
     applyActive();
@@ -750,70 +780,83 @@
     if (!active) return;
     active = false;
     document.getElementById(CONTAINER_ID)?.remove();
-    for (const el of document.querySelectorAll(`[${HIDDEN_ATTR}]`)) el.removeAttribute(HIDDEN_ATTR);
-    const ourLi = document.querySelector(`li[${LI_ATTR}]`);
-    if (demotedLi?.isConnected && demotedClass) {
-      if (ourLi) ourLi.className = demotedLi.className;
-      demotedLi.className = demotedClass;
-    }
-    demotedLi = null;
-    demotedClass = "";
+    document.getElementById(PANEL_ID)?.remove();
+    pushedEntry = false;
     if (restoreUrl && isFakePath()) history.replaceState(null, "", lastRealPath);
   }
 
   // ── Events ──────────────────────────────────────────────────────────────────
 
-  function onOwnLinkClick(e) {
+  function pushFake(path = TABS[0].path) {
+    history.pushState(null, "", path);
+    pushedEntry = true;
+  }
+
+  // The menu item. This deliberately lets the click propagate so Tulip's popup
+  // dismissal still sees it; the synthetic Escape is the fallback for builds
+  // that only close on a keyed dismiss. Dispatched from the link, not document
+  // — React delegates from its root container, so an event fired on document
+  // never reaches the popup — and before activating, because our own Escape
+  // handler bails while the page is closed. That ordering is what stops this
+  // from immediately closing the page it's opening.
+  function onMenuLinkClick(e) {
     e.preventDefault();
-    e.stopPropagation();
-    if (active || !enabled) return;
+    if (!enabled || active) return;
+    e.currentTarget.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
     lastRealPath = isFakePath() ? lastRealPath : location.pathname;
-    history.pushState(null, "", FAKE_PATH);
+    pushFake();
     activate();
   }
 
-  // Capture-phase: when a real link is clicked while our page is showing,
-  // deactivate and realign the URL with the router's belief *before* React's
-  // own click handler runs, then let the navigation proceed normally.
-  function onDocumentClick(e) {
-    if (!active) return;
-    const a = e.target instanceof Element ? e.target.closest("a[href]") : null;
-    if (!a || a.closest(`li[${LI_ATTR}]`)) return;
-    deactivate({ restoreUrl: true });
+  // The panel covers the window, so this is the only way out. Popping our own
+  // entry is the honest route; a cold load onto the fake URL has none, so
+  // leave for wherever Tulip last was (or the app root).
+  function goBack() {
+    if (pushedEntry) {
+      history.back(); // popstate → deactivate
+      return;
+    }
+    deactivate({ restoreUrl: false });
+    location.assign(lastRealPath || "/");
+  }
+
+  function onKeyDown(e) {
+    if (e.key !== "Escape" || !active) return;
+    if (e.target instanceof Element && e.target.closest("input, textarea, select")) return;
+    goBack();
   }
 
   function onPopState() {
     if (!enabled) return;
-    if (isFakePath()) activate();
-    else deactivate({ restoreUrl: false });
+    if (isFakePath()) {
+      // Back/forward between tabs, or onto the page from outside it.
+      activeTabId = tabForPath().id;
+      if (active) applyActive();
+      else activate();
+    } else {
+      deactivate({ restoreUrl: false });
+    }
   }
 
   // ── Observer loop ───────────────────────────────────────────────────────────
 
   function ensure() {
-    const ul = findSettingsUl();
-    if (!ul) {
-      // Settings page unmounted (navigated elsewhere in the SPA).
-      if (active && !document.getElementById(CONTAINER_ID)?.isConnected) {
-        active = false;
-        demotedLi = null;
-        demotedClass = "";
-      }
-      return;
-    }
-    injectLi(ul);
+    injectMenuLi();
     if (coldLoadWanted && !active) {
       coldLoadWanted = false;
-      if (!isFakePath()) {
-        // Tulip's SPA redirected the unknown route somewhere real — remember
-        // it as the fallback, then take the URL back.
-        lastRealPath = location.pathname;
-        history.pushState(null, "", FAKE_PATH);
-      }
       activate();
       return;
     }
-    if (active) applyActive();
+    if (!active) return;
+    // A cold load lands on a route Tulip doesn't know; its router may redirect
+    // out from under us a moment later. Take the URL back — replaceState, so
+    // the history we'd pop is untouched — and keep where it wanted to go as
+    // the exit path.
+    if (performance.now() < coldLoadGuardUntil && !isFakePath()) {
+      lastRealPath = location.pathname;
+      history.replaceState(null, "", currentTab().path);
+    }
+    applyActive();
   }
 
   function scheduleEnsure() {
@@ -828,7 +871,14 @@
   function start() {
     ensureStyles(STYLE_ID, CSS);
     coldLoadWanted = isFakePath();
-    document.addEventListener("click", onDocumentClick, true);
+    if (coldLoadWanted) {
+      coldLoadGuardUntil = performance.now() + COLD_LOAD_GUARD_MS;
+      // A late redirect usually arrives with a render, but don't rely on the
+      // mutation that carries it being the last one.
+      setTimeout(scheduleEnsure, 300);
+      setTimeout(scheduleEnsure, 1500);
+    }
+    document.addEventListener("keydown", onKeyDown, true);
     window.addEventListener("popstate", onPopState);
     observer = new MutationObserver(scheduleEnsure);
     observer.observe(document.body, { childList: true, subtree: true });
@@ -838,10 +888,10 @@
   function stop() {
     observer?.disconnect();
     observer = null;
-    document.removeEventListener("click", onDocumentClick, true);
+    document.removeEventListener("keydown", onKeyDown, true);
     window.removeEventListener("popstate", onPopState);
     deactivate({ restoreUrl: true });
-    removeLi();
+    removeMenuLi();
     removeStyles(STYLE_ID);
   }
 

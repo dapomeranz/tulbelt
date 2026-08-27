@@ -190,7 +190,7 @@ export const FEATURES = [
     id: "option-sets-builder",
     name: "Option Sets Builder",
     description:
-      'Adds an "Option Sets" page to Account Settings at the fake URL /account/option-sets. Build named option sets typed as Text, Integer, or Number: add, edit, reorder, and remove options, each with an optional description. In trigger editors, the "Select source of data" dropdown gains an "Option Set" entry — pick a set, pick an option, and the row is filled in as a normal Static value. Stored in the tenant\'s localStorage — local to this browser and Tulip instance.',
+      'Adds a Tulbelt page to the account dropdown (the My profile menu), at the fake URL /tulbelt/option-sets. Its Option Sets tab builds named option sets typed as Text, Integer, or Number: add, edit, reorder, and remove options, each with an optional description. In trigger editors, the "Select source of data" dropdown gains an "Option Set" entry — pick a set, pick an option, and the row is filled in as a normal Static value. Stored in the tenant\'s localStorage — local to this browser and Tulip instance.',
     defaultEnabled: true,
   },
   {
