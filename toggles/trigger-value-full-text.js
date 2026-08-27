@@ -165,8 +165,9 @@
     });
 
     // field-sizing: content handles auto-grow on Chrome 123+; fall back to a
-    // scrollHeight resize for older builds.
-    if (!CSS.supports("field-sizing", "content")) {
+    // scrollHeight resize for older builds. window.CSS — the file-scoped CSS
+    // string above shadows the global.
+    if (!window.CSS.supports("field-sizing", "content")) {
       const grow = () => {
         proxy.style.height = "auto";
         proxy.style.height = `${proxy.scrollHeight}px`;
