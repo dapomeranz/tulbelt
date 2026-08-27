@@ -36,21 +36,21 @@ export const FEATURES = [
   },
   {
     id: "reorder-row-buttons",
-    name: "Quicker App Button Access",
+    name: "Quicker App List Access",
     description:
       "On app and folder lists, move the edit and actions buttons next to each row’s name instead of the far right.",
     defaultEnabled: true,
   },
   {
     id: "auto-snapshot",
-    name: "Auto-Snapshot Every 15 Minutes",
+    name: "Auto-Snapshot Every 15m",
     description:
       "Track active editing time per app and automatically create a snapshot every 15 minutes of activity.",
     defaultEnabled: false,
   },
   {
     id: "hide-legacy-tiles",
-    name: "Hide Minor Legacy Features",
+    name: "Hide Minor Legacy Tiles",
     description:
       "In the app editor context pane, hide deprecated tiles: Step cycle time, Step comments, Process cycle time, and App comments.",
     defaultEnabled: true,
@@ -139,7 +139,7 @@ export const FEATURES = [
   },
   {
     id: "collapse-tables-tile",
-    name: "Collapse Records Rows",
+    name: "Collapse Record Placeholders",
     description:
       'On app editor pages, click the caret at the right edge of a table row in the Tables tile to collapse/expand its Query, Record Placeholder, and linked record buttons. Each table starts collapsed — only the icon, table name, and a two-line "· N placeholders" / "· M aggregations" summary show until you expand it. The table name still opens its menu on click. A "Collapse all" / "Expand all" toggle below the Add Table row collapses or expands every table at once.',
     defaultEnabled: true,
@@ -181,7 +181,7 @@ export const FEATURES = [
   },
   {
     id: "submitted-pending-approvals",
-    name: "Pending Approvals: Show Apps I Submitted",
+    name: "Improved Pending Approvals",
     description:
       'On the Pending Approvals page, adds a toggle pill next to the page heading that switches between "Pending my approval" (Tulip\'s default view) and "Submitted by me" — apps you submitted for approval that still have at least one pending sign-off from someone else.',
     defaultEnabled: true,
@@ -195,23 +195,30 @@ export const FEATURES = [
   },
   {
     id: "trigger-value-full-text",
-    name: "Show Full Trigger Value Text",
+    name: "Wider Trigger Value Text",
     description:
-      "In the trigger editor, when a value text box's content is longer than the box, replace it with an editable box that sizes to its text — beside the selects while it fits there, wrapping to its own line when it doesn't, and going full-width only once the text spans 2+ lines. Short values keep the normal input; the swap only happens when the field isn't focused, and Enter still commits.",
+      "In the trigger editor, widen value text boxes so long values are readable: the box grows to fit its own text, up to the width of the row. Values that already fit are left exactly as they are, and hovering a value that's still too long shows the full text as a tooltip.",
     defaultEnabled: true,
   },
   {
     id: "flatten-top-menu",
-    name: "Flatten Top Menu",
+    name: "Flatten Navbar",
     description:
       "Lift the links hidden behind the header's hover dropdowns (Apps, Shop floor, …) into the header bar itself, and stop the dropdowns from opening. The menu contents are read from your own instance — nothing is hardcoded — so you get exactly the sections your license and permissions expose. Most instances won't open their menus for anything but a real cursor, so the first time you use this, hover each dropdown once and the bar flattens and stays that way. A parent link is dropped when a menu item already points at the same page (Shop floor → Stations), status flags like “New” and “Upgrade” are stripped off the labels, and the current section stays highlighted.",
     defaultEnabled: false,
   },
   {
     id: "paste-trigger-anywhere",
-    name: "Paste Trigger Anywhere",
+    name: "Paste Triggers Anywhere",
     description:
       "In the app editor, add a paste icon beside every trigger list heading — App started / Completed / Cancelled, a step’s On step enter / On step exit / Timers / Machines \u0026 devices, and a widget’s or custom widget’s own event sections — so a copied trigger can be pasted onto a surface Ctrl+V cannot reach: a button trigger onto App started, an On step enter trigger onto a widget, a custom widget’s trigger onto a different custom widget. The trigger editor opens with the destination’s “When” already set. Note that Tulip creates the pasted trigger the moment you paste, before you save anything, so an unwanted paste is a real trigger you have to delete.",
+    defaultEnabled: true,
+  },
+  {
+    id: "data-queries",
+    name: "Data Queries",
+    description:
+      'Adds a "Data Queries" tab to the Tulbelt page (account dropdown → Tulbelt). Paste a table id — or a table URL — to load its columns, then build a query against them: filter rows (field, operator, value) matched on all or any, sort options, and a row limit. Run it to see the records in a grid with real field labels, and save it under a name to re-run later. Operators are narrowed by each column\'s data type, and the whole filter vocabulary mirrors the Tulip table API\'s own (equal, contains, startsWith, isIn, blank, …). The requests are the same private table API calls Tulip\'s own table page makes, issued from your browser with the session credentials the page already holds, so you see exactly what your account can already see. Saved queries live in this browser\'s local storage for this Tulip instance — nothing leaves the browser.',
     defaultEnabled: false,
   },
   {
@@ -224,13 +231,18 @@ export const FEATURES = [
   },
 ];
 
-// The popup list: one alphabetical run, no sections. Set `developerOnly: true`
-// to hide a feature until developer mode (five clicks on the popup title).
-// Reload the extension after editing this file.
+// The popup list: the opt-in toggles first, then the ones that ship on, each run
+// alphabetical. The popup draws its section label at the boundary between them.
+// Set `developerOnly: true` to hide a feature until developer mode (five clicks
+// on the popup title). Reload the extension after editing this file.
 export function getPopupFeatures({ showDeveloperFeatures = false } = {}) {
   return FEATURES.filter(
     (feature) => feature.developerOnly !== true || showDeveloperFeatures,
-  ).sort((a, b) => a.name.localeCompare(b.name));
+  ).sort(
+    (a, b) =>
+      Number(a.defaultEnabled === true) - Number(b.defaultEnabled === true) ||
+      a.name.localeCompare(b.name),
+  );
 }
 
 export const STORAGE_KEY = "toggles";

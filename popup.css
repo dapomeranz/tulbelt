@@ -30,9 +30,14 @@
   box-sizing: border-box;
 }
 
+html {
+  overscroll-behavior: none;
+}
+
 body {
   margin: 0;
   width: 272px;
+  overscroll-behavior: none;
   display: flex;
   flex-direction: column;
   font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
@@ -48,7 +53,7 @@ header {
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  padding: 12px 14px;
+  padding: 9px 14px;
   border-bottom: 1px solid var(--hairline);
 }
 
@@ -121,7 +126,7 @@ header .subtitle {
 
 .search-bar {
   flex-shrink: 0;
-  padding: 8px 10px;
+  padding: 6px 10px;
   border-bottom: 1px solid var(--hairline);
 }
 
@@ -161,7 +166,7 @@ header .subtitle {
   flex-shrink: 0;
   display: flex;
   gap: 12px;
-  padding: 7px 14px;
+  padding: 5px 14px;
   border-bottom: 1px solid var(--hairline);
 }
 
@@ -180,8 +185,8 @@ header .subtitle {
   cursor: pointer;
 }
 
-/* Sits apart from the two bulk links: it discards choices rather than setting
-   them all one way. */
+/* Sits apart from All Off: it discards choices rather than setting them all one
+   way. */
 .bulk-actions .bulk-trailing {
   margin-left: auto;
 }
@@ -201,8 +206,21 @@ ul#toggles {
   flex: 1;
   min-height: 0;
   list-style: none;
-  padding: 5px;
+  padding: 4px 5px;
   margin: 0;
+}
+
+/* Splits the list where the toggles that ship on begin. Sits inside the list so
+   it scrolls with the rows it labels. */
+.section-label {
+  margin: 5px 4px 2px;
+  padding: 7px 5px 0;
+  border-top: 1px solid var(--hairline);
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
 }
 
 .no-results {
@@ -218,7 +236,7 @@ ul#toggles {
   align-items: center;
   justify-content: space-between;
   gap: 10px;
-  padding: 7px 9px;
+  padding: 5px 9px;
   border-radius: 7px;
   cursor: pointer;
   transition: background 0.12s ease;

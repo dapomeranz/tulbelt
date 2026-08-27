@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
-  "name": "Tulbelt Unlisted",
-  "version": "1.0.6",
+  "name": "Tulbelt",
+  "version": "1.0.9",
   "description": "Quality-of-life toggles for tulip.co.",
   "permissions": [
     "declarativeNetRequestWithHostAccess",
@@ -22,6 +22,7 @@
       ],
       "js": [
         "toggles/lib.js",
+        "toggles/tulbelt-page.js",
         "toggles/devtools.js",
         "toggles/reorder-row-buttons.js",
         "toggles/auto-snapshot.js",
@@ -45,6 +46,8 @@
         "toggles/app-list-date-columns.js",
         "toggles/option-sets-builder.js",
         "toggles/option-sets-trigger.js",
+        "toggles/data-queries-model.js",
+        "toggles/data-queries.js",
         "toggles/trigger-value-full-text.js",
         "toggles/flatten-top-menu.js",
         "toggles/paste-trigger-anywhere.js",
@@ -81,7 +84,8 @@
       "js": [
         "toggles/app-list-date-columns-main.js",
         "toggles/submitted-pending-approvals-main.js",
-        "toggles/paste-trigger-anywhere-main.js"
+        "toggles/paste-trigger-anywhere-main.js",
+        "toggles/tulbelt-session-main.js"
       ],
       "run_at": "document_start",
       "world": "MAIN"

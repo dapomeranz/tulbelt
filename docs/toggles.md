@@ -9,9 +9,10 @@ if the two ever disagree, `features.js` wins.
 "Default" is the state a fresh install starts in; you can flip any toggle from
 the popup at any time, and every toggle cleanly reverts when switched off.
 
-Toggles are listed alphabetically in one ungrouped run, as the popup shows them.
-(The popup sorts by each toggle's `name`; the headings below are this page's own
-titles, so the two orders are close but not identical.)
+Toggles are listed alphabetically in one ungrouped run. The popup groups them
+instead: the opt-in toggles first, then an "On by default" section holding the
+ones that ship on, each run alphabetical by `name`. (The headings below are this
+page's own titles, so its order and the popup's are close but not identical.)
 
 ### App list Created/Completed columns — `app-list-date-columns` · **default: on**
 
@@ -68,6 +69,75 @@ Applies a dark color scheme to tulip.co via filter-inversion (invert, contrast,
 brightness on the document; restored regions use the exact inverse so previews,
 canvas, images, and video stay hue-faithful). Targeted tweaks for specific
 surfaces are layered on top.
+
+### Data queries — `data-queries` · **default: off**
+
+Adds a **Data Queries** tab to the Tulbelt page (account dropdown → **Tulbelt**;
+see [the shared page shell](#the-tulbelt-page-shell) below). Paste a table id —
+`Sb28KTCAWbt6PLm5f` — or a whole table URL and hit **Load table** to fetch its
+columns, then build a query against them and save it under a name.
+
+**The builder.** Filter rows are *field · operator · value*, matched on **all**
+or **any**; plus sort rows and a row limit. The operators offered for a column
+are narrowed by its `dataType` — a text column gets `contains`/`startsWith`, a
+number or timestamp gets the comparisons, and an unrecognised type gets all
+sixteen rather than hiding the one you needed. `is any of` / `is none of` take a
+comma-separated list and are sent as a JSON array. `is blank` / `is not blank`
+take no value at all. Rows with no field chosen are ignored, so a half-filled
+row never blocks a run.
+
+**Saved queries** are listed down the left: click one to load and run it, `×` to
+delete (with a confirm step). Saving requires a name; saving again under the
+same name updates in place rather than duplicating. They live in the tenant's
+`localStorage` under `tulbelt-data-queries` — per browser, per Tulip instance,
+never shared. That key previously held a bare table id; that value is migrated
+to `lastTableId` on first read.
+
+**Replicated types.** `toggles/data-queries-model.js` holds the whole query
+vocabulary — the 16-member `FilterFunctionType`, `Filter`, `SortOption`,
+`FilterAggregator`, and the `buildQueryString` serialisation rules — replicated
+from `@locus-ot/tulip-api` (v1.0.39) rather than imported: that package is
+proprietary, this extension is MIT, and MV3 content scripts have no bundler to
+import through. The replication is verified by differential test against the
+real package — every operator's output and the assembled query string are
+byte-identical to the library's. A consequence worth keeping: **a saved query is
+a valid `getRecords()` params object**, so anything built here can be pasted
+straight into a Node script using the actual library. If that library's filter
+contract changes, the model file is the single place to update; the version
+above is the pin.
+
+The model is pure (no DOM), so it can be exercised on its own; `data-queries.js`
+is the UI over it and owns no query semantics.
+
+**The calls** are the ones Tulip's own table page makes:
+
+```
+GET /api/v3/w/<wsId>/tables/<tableId>/records?filters=…&filterAggregator=…&sortOptions=…&limit=…&offset=0
+GET /api/v3/w/<wsId>/tables/<tableId>          (columns + labels; failure is non-fatal)
+```
+
+**Auth.** No API key field, and nothing is stored. `toggles/tulbelt-session-main.js`
+runs in the MAIN world at `document_start` and patches `fetch`/`XHR` to capture
+the `Authorization: Basic …` header Tulip's own frontend sends, parking it (with
+the numeric workspace id, which the browser URL doesn't carry — it shows a slug
+like `/w/DEFAULT/`) on `<html>` as `data-tulbelt-auth` / `data-tulbelt-wsid` for
+the isolated world to read. Requests go out same-origin with
+`credentials: "include"` as well, so a rejected header is retried once on cookies
+alone before giving up; if nothing has been captured yet — a cold load straight
+onto the fake URL, or the extension reloaded into an already-open tab — the error
+says to open a Tulip page in the tab and come back. Everything is scoped to the
+signed-in session, so the page can only show what the account can already see.
+
+**Results.** The union of keys across the page (records omit fields they have no
+value for), ordered ID → the table's own fields → `Seq`/`Created`/`Updated`.
+Headers use real field labels from the metadata call; when that doesn't land,
+they're derived from the field id instead — Tulip prefixes user fields with a
+five-character handle, so `mreav_product_name` reads as "Product Name" with no
+metadata at all. The raw id is on the header's tooltip either way. Values that
+look like URLs render as links, timestamps are localised (raw on hover), and
+long text is ellipsised to 320px with the full value on hover.
+
+Pagination, column selection, and CSV export are deliberately not built.
 
 ### Dev Tools (agent debugging) — `dev-tools` · **default: off** · **developer-only**
 
@@ -260,30 +330,8 @@ button into the top toolbar.
 
 ### Option Sets builder — `option-sets-builder` · **default: on**
 
-Adds a **Tulbelt** item to the account dropdown (the menu with My profile /
-Sign out), anchored on `li[data-testid="my-profile-menuitem"]` and placed above
-Sign out. That menu is the only entry point on purpose: the account settings
-pages aren't available to every user, so nothing here hangs off the settings
-sidebar. The clone carries no React fiber, so Tulip's delegated handlers never
-fire for it, and the click dispatches a synthetic Escape *from the link* (React
-delegates from its root container, so an event fired on `document` would never
-reach the popup) to dismiss the menu.
-
-Clicking it shows a Tulbelt-owned page at the fake URL `/tulbelt/option-sets`:
-a fixed full-window panel appended to `<body>` with its own Back bar and tab
-strip, owing nothing to Tulip's layout so it renders identically at any
-permission level. The tab strip is driven by the `TABS` array — Option Sets is
-the only tab today, and a second one is an entry there plus a branch in
-`buildContainer`/`render`. Tab switches `replaceState` so Back leaves Tulbelt
-rather than walking tabs. The URL is set with `history.pushState`, which React
-Router never observes, so Tulip keeps rendering whatever it had underneath.
-
-The panel covers the app, so Back (or Escape, unless focus is in a field) is
-the only way out: it pops our own history entry when we pushed one, otherwise
-it navigates to the last real path. Hard reloads on the fake URL re-activate;
-because it's a route Tulip doesn't know, its router may redirect out from under
-us shortly after load, so for 5s we reclaim the URL with `replaceState` and
-keep the redirect target as the exit path.
+The **Option Sets** tab of the Tulbelt page ([shell](#the-tulbelt-page-shell)),
+at the fake URL `/tulbelt/option-sets`.
 
 The page is a master–detail builder for named option sets typed as Text,
 Integer, or Number (type fixed at creation). Options are ordered rows —
@@ -359,21 +407,25 @@ the transient popper reverts cleanly on disable.
 
 ### Show full trigger value text — `trigger-value-full-text` · **default: on**
 
-In the trigger editor, when a Value Picker text box's content is longer than
-the box (`input[aria-label="Value Picker"]`, e.g. static Text values), replaces
-it with an editable box that sizes to its text: beside the selects while the
-text fits in the leftover space, on its own line when it doesn't, and
-stretched to the full row width (soft-wrapping onto 2+ lines and auto-growing)
-only once the text is longer than the row. Values that fit keep the
-untouched native input, and swaps in either direction only happen while the
-field isn't focused (on mount or blur), so the caret is never yanked
-mid-typing. Built from the same two patterns as other trigger toggles: the
-real React-controlled input is hidden (wrapper and all — its wrapper has a
-fixed 35px height that would clip anything taller) and a `<textarea>` proxy is
-inserted after the row's `triggerUnitStyles` container; edits forward back via
-the native value setter + bubbling input/change events. Enter commits
-(forwarded to the real input) instead of inserting a newline — the underlying
-value can't hold line breaks.
+In the trigger editor, widens Value Picker text boxes
+(`input[aria-label="Value Picker"]`, e.g. static Text values) so long values
+are readable: `field-sizing: content` grows the input to its own text and the
+fixed-width wrapper around it is released, both capped at the row width. A
+min-width floor at Tulip's stock ~175px means the toggle only ever adds width,
+so a value that already fits looks exactly as it does with the toggle off. For
+values still too long for the row, hovering the input shows the full text as a
+native `title` tooltip, read off the input at mouseover time (never kept in
+sync, so it can't go stale); a `title` Tulip set itself is left alone, and ours
+are removed on disable.
+
+Read-only by design. An earlier version hid the real input and rendered an
+editable `<textarea>` proxy so long values could soft-wrap onto several lines —
+the only way to get wrapping, since `input[type=text]` cannot wrap by spec.
+That required forwarding every keystroke back into the hidden input via the
+native value setter, and those writes never reached Tulip's saved trigger:
+edits made in the proxy were silently dropped on save while edits typed into
+the stock input saved fine. Nothing here reads or writes the value, so the real
+input stays the only source of truth and there is no save path to break.
 
 ### Snap widgets to 10px grid — `snap-to-grid` · **default: off**
 
@@ -422,3 +474,55 @@ entirely — the isolated half dispatches the new string to
 `toggles/filters-builder-main.js` (MAIN world), which calls that onChange
 directly; Tulip re-renders inputs and pills from the string. Nothing is written
 until the user edits a builder field.
+
+## The Tulbelt page shell
+
+`toggles/tulbelt-page.js` owns one full-window page reached from the account
+dropdown (the menu with My profile / Sign out) — the only entry point on
+purpose, since the account *settings* pages aren't available to every user, so
+nothing hangs off the settings sidebar. The item is anchored on
+`li[data-testid="my-profile-menuitem"]` and placed above Sign out. The clone
+carries no React fiber, so Tulip's delegated handlers never fire for it, and
+the click dispatches a synthetic Escape *from the link* (React delegates from
+its root container, so an event fired on `document` would never reach the
+popup) to dismiss the menu.
+
+The page is a fixed panel appended to `<body>` with its own Back bar and tab
+strip, owing nothing to Tulip's layout so it renders identically at any
+permission level. Its URL is set with `history.pushState` to `/tulbelt/<tab>`,
+which React Router never observes, so Tulip keeps rendering whatever it had
+underneath while we cover it.
+
+The panel covers the app, so Back (or Escape, unless focus is in a field) is
+the only way out: it pops our own history entry when we pushed one, otherwise
+it navigates to the last real path. Tab switches use `replaceState` so Back
+leaves Tulbelt rather than walking the tabs. Hard reloads on a fake URL
+re-activate; because it's a route Tulip doesn't know, its router may redirect
+out from under us shortly after load, so for 5s we reclaim the URL with
+`replaceState` and keep the redirect target as the exit path.
+
+The shell has **no toggle of its own**. Tabs come from other toggles, which
+register while they're on:
+
+```js
+window.__tulbeltPage.register({
+  id: "data-queries",              // tab id; also the URL tail
+  label: "Data Queries",           // tab strip label
+  containerId: "tulbelt-dq-page",  // id set on the content div, for CSS scoping
+  order: 20,                       // tab strip position, ascending
+  mount(container) { ... },        // fill the content div
+  unmount() { ... },               // optional; called when the tab closes
+});
+window.__tulbeltPage.unregister("data-queries");
+```
+
+Registration *is* the enable signal, so the account-menu item appears when the
+first page registers and disappears when the last one unregisters. The tab strip
+hides itself when only one page is registered — a lone tab is a label, not a
+choice, and the Back bar already says Tulbelt. Turning off the toggle for the tab
+you're currently looking at falls back to the first remaining tab (and takes the
+URL with it) rather than leaving an empty panel.
+
+Current pages: [Option Sets](#option-sets-builder--option-sets-builder--default-on)
+(`order: 10`) and [Data queries](#data-queries--data-queries--default-off)
+(`order: 20`).

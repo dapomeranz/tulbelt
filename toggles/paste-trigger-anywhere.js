@@ -45,6 +45,7 @@
   const STEP_ATTR = "data-tulbelt-pta-step";
   const CLAIMED_ATTR = "data-tulbelt-pta-claimed";
   const GROUP_MARK = "data-tulbelt-pta-group";
+  const TIP_ATTR = "data-tulbelt-pta-tip";
   const STYLE_ID = "tulbelt-paste-trigger-anywhere-styles";
   const RESULT_EVENT = "tulbelt:pta-result";
 
@@ -87,30 +88,71 @@
     Object.keys(DESTINATIONS).filter((h) => STEP_CLASS.has(DESTINATIONS[h])),
   );
 
-  // Tulip's own icon buttons are a bare 19px Material glyph on a transparent
-  // background (see the "+" this sits beside), so match that rather than
-  // introducing a bordered control into the row.
+  // A bare Material glyph on a transparent background, like the "+" and gear it
+  // sits beside, but a size down from their 19px so an added control reads as
+  // secondary to Tulip's own. Ink is Tulip's own #0f1c2c, and hover is a faint
+  // grey disc behind the glyph rather than a colour change. The box is a 32px
+  // square — the disc the size of the "+" button's own wrapper beside it, glyph
+  // centred in it, centred on the row so the two line up. The failure state is
+  // the one thing allowed to widen past it.
   const CSS = `
     button[${BUTTON_ATTR}] {
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      margin: 0 2px;
-      padding: 2px;
+      flex: 0 0 auto;
+      align-self: center;
+      width: 32px;
+      height: 32px;
+      margin: 0 1px;
+      padding: 0;
       background: transparent;
       border: 0;
-      border-radius: 3px;
-      color: inherit;
+      border-radius: 50%;
+      color: rgb(15, 28, 44);
       font: inherit;
       font-size: 11px;
       line-height: 1;
-      opacity: 0.65;
       cursor: pointer;
       vertical-align: middle;
+      position: relative;
     }
-    button[${BUTTON_ATTR}]:hover { opacity: 1; }
-    button[${BUTTON_ATTR}] svg { display: block; width: 19px; height: 19px; fill: currentColor; }
-    button[${BUTTON_ATTR}][disabled] { cursor: default; opacity: 1; }
+    button[${BUTTON_ATTR}]:hover { background: rgba(15, 28, 44, 0.05); }
+    /* Tulip's own icons get a dark tooltip bubble on hover, so this matches it
+       rather than leaving the OS title tip. Anchored to the button's right edge
+       so it grows leftward into the pane instead of off its edge. */
+    button[${BUTTON_ATTR}][${TIP_ATTR}]::after {
+      content: attr(${TIP_ATTR});
+      position: absolute;
+      top: 100%;
+      right: 0;
+      margin-top: -2px;
+      padding: 4px 8px;
+      border-radius: 3px;
+      background: rgb(15, 28, 44);
+      color: #fff;
+      font-size: 11px;
+      line-height: 1.4;
+      white-space: nowrap;
+      pointer-events: none;
+      opacity: 0;
+      z-index: 2147483000;
+    }
+    button[${BUTTON_ATTR}]:hover::after,
+    button[${BUTTON_ATTR}]:focus-visible::after {
+      opacity: 1;
+      transition: opacity 80ms linear 250ms;
+    }
+    button[${BUTTON_ATTR}] svg { display: block; width: 16px; height: 16px; fill: currentColor; }
+    button[${BUTTON_ATTR}][disabled] {
+      cursor: default;
+      background: transparent;
+      border-radius: 16px;
+      width: auto;
+      min-width: 32px;
+      padding: 0 6px;
+      white-space: nowrap;
+    }
   `;
 
   // Material glyphs on the same 24x24 viewBox Tulip's own icons use.
@@ -138,9 +180,11 @@
     button.type = "button";
     button.setAttribute(BUTTON_ATTR, type);
     if (stepId) button.setAttribute(STEP_ATTR, stepId);
-    // Icon-only, so the name lives in aria-label and the native tooltip.
+    // Icon-only, so the name lives in aria-label for screen readers and in the
+    // tooltip attribute the CSS bubble above renders. No native `title`: the two
+    // would stack, and the OS one is both slower and out of place in Tulip's UI.
     button.setAttribute("aria-label", LABEL);
-    button.title = LABEL;
+    button.setAttribute(TIP_ATTR, LABEL);
     setIcon(button, "paste");
     return button;
   }
@@ -179,6 +223,42 @@
     return { type, stepId: null, heading };
   }
 
+  // The cog is the one header icon that comes and goes (it appears once a group
+  // has triggers), so it is found by role rather than by position. `haspopup`
+  // is the structural mark; the label is the fallback for a build that drops it.
+  function settingsButton(row) {
+    return row.querySelector('button[aria-haspopup="menu"], button[aria-label="Settings"]');
+  }
+
+  // The row-level element containing `el` — the icon's wrapper div, not the
+  // button itself, so inserting after it lands outside the wrapper.
+  function rowChild(row, el) {
+    let node = el;
+    while (node && node.parentElement && node.parentElement !== row) node = node.parentElement;
+    return node && node.parentElement === row ? node : null;
+  }
+
+  // Right-hand icon cluster rather than trailing the heading text: just after
+  // the settings cog where a group has one, and at the head of the cluster
+  // where it doesn't. The label and the icons are siblings in one flex row, so
+  // this is positional — no hashed class names, and no dependence on the
+  // `data-istarget` marks that disable-tooltips stashes away.
+  function placeButton(row, heading, button) {
+    const anchor = rowChild(row, settingsButton(row)) || heading;
+    if (anchor === button || anchor.nextElementSibling === button) return;
+    row.insertBefore(button, anchor.nextElementSibling);
+  }
+
+  // The cog is not there when a group is empty and appears with its first
+  // trigger, so a group claimed while empty has its button on the cog's left.
+  // Re-placing on each scan puts it back on the right when the cog turns up.
+  function reposition(group) {
+    const button = group.querySelector("[" + BUTTON_ATTR + "]");
+    const heading = group.querySelector(HEADING_SEL);
+    if (!button || !heading || !heading.parentElement) return;
+    placeButton(heading.parentElement, heading, button);
+  }
+
   function addButton(group) {
     if (group.getAttribute(CLAIMED_ATTR) === "1") return;
     const heading = group.querySelector(HEADING_SEL);
@@ -202,7 +282,10 @@
 
     // The main-world half listens for clicks on this element directly — the
     // DOM is shared between worlds even though the JS environments are not.
-    heading.appendChild(createPasteButton(type, stepId));
+    const button = createPasteButton(type, stepId);
+    const row = heading.parentElement;
+    if (row) placeButton(row, heading, button);
+    else heading.appendChild(button);
   }
 
   // A widget with a single event — a button — has no section headings to hang a
@@ -228,7 +311,10 @@
 
   function scan() {
     if (!active) return;
-    for (const group of document.querySelectorAll(GROUP_SEL)) addButton(group);
+    for (const group of document.querySelectorAll(GROUP_SEL)) {
+      if (group.getAttribute(CLAIMED_ATTR) === "1") reposition(group);
+      else addButton(group);
+    }
     for (const section of document.querySelectorAll(SECTION_SEL)) addPanelButton(section);
   }
 
@@ -253,18 +339,18 @@
     if (!detail || !button || !button.hasAttribute(BUTTON_ATTR)) return;
     button.disabled = true;
     if (detail.ok) {
-      button.title = "Pasted";
+      button.setAttribute(TIP_ATTR, "Pasted");
       setIcon(button, "done");
     } else {
       // An icon can't carry a reason, and a tooltip the user has to hover for
       // is no use for something that just happened — so a refusal shows its
       // text and reverts to the icon.
       const message = detail.error || "Paste failed";
-      button.title = message;
+      button.setAttribute(TIP_ATTR, message);
       button.textContent = message;
     }
     setTimeout(() => {
-      button.title = LABEL;
+      button.setAttribute(TIP_ATTR, LABEL);
       setIcon(button, "paste");
       button.disabled = false;
     }, 2200);

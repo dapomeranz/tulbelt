@@ -34,6 +34,9 @@ featureTemplate.innerHTML = `
   </li>
 `;
 
+const sectionTemplate = document.createElement("template");
+sectionTemplate.innerHTML = `<li class="section-label">On by default</li>`;
+
 const tooltip = document.getElementById("tooltip");
 const SHOW_DELAY_MS = 150;
 let showTimer = null;
@@ -113,20 +116,27 @@ function createFeatureNode(feature, enabled) {
   return node;
 }
 
+// getPopupFeatures hands back the opt-in run first, so the boundary is the first
+// default-on feature. Only that line gets a label: it reads as "everything below
+// ships on", which leaves the run above it needing no heading of its own.
 function buildPopupFeatures(toggles, showDeveloperFeatures) {
-  return getPopupFeatures({ showDeveloperFeatures }).map((feature) =>
-    createFeatureNode(feature, toggles[feature.id]),
-  );
+  const features = getPopupFeatures({ showDeveloperFeatures });
+  const nodes = features.map((feature) => createFeatureNode(feature, toggles[feature.id]));
+  const boundary = features.findIndex((feature) => feature.defaultEnabled === true);
+  if (boundary > -1) {
+    nodes.splice(boundary, 0, sectionTemplate.content.firstElementChild.cloneNode(true));
+  }
+  return nodes;
 }
 
 // Only ever runs with the list unfiltered (the links hide during a search), so
 // this is every row the popup is showing — which can never include a
 // developer-only feature, as those aren't rendered outside developer mode.
-function setAll(list, enabled) {
+function turnAllOff(list) {
   const updates = {};
   for (const node of list.querySelectorAll(".feature")) {
-    node.querySelector("input").checked = enabled;
-    updates[node.dataset.featureId] = enabled;
+    node.querySelector("input").checked = false;
+    updates[node.dataset.featureId] = false;
   }
   return setToggles(updates);
 }
@@ -148,6 +158,23 @@ function syncBulkActions(bulkActions, query) {
   bulkActions.hidden = query.trim() !== "";
 }
 
+// A label describes the rows under it, so it goes when a search leaves none of
+// them showing. Walks forward to the next label rather than counting, so adding
+// a second section later needs no changes here.
+function syncSectionLabels(list) {
+  for (const label of list.querySelectorAll(".section-label")) {
+    let hasVisibleRows = false;
+    for (let node = label.nextElementSibling; node; node = node.nextElementSibling) {
+      if (node.classList.contains("section-label")) break;
+      if (!node.hidden) {
+        hasVisibleRows = true;
+        break;
+      }
+    }
+    label.hidden = !hasVisibleRows;
+  }
+}
+
 function filterFeatures(query, list, noResults) {
   const q = query.trim().toLowerCase();
   let visibleFeatures = 0;
@@ -160,6 +187,7 @@ function filterFeatures(query, list, noResults) {
     if (show) visibleFeatures++;
   }
 
+  syncSectionLabels(list);
   noResults.hidden = visibleFeatures > 0;
   list.hidden = visibleFeatures === 0;
 }
@@ -211,8 +239,7 @@ async function render() {
   };
 
   search.addEventListener("input", applyFilter);
-  bulkActions.querySelector("#all-on").addEventListener("click", () => setAll(list, true));
-  bulkActions.querySelector("#all-off").addEventListener("click", () => setAll(list, false));
+  bulkActions.querySelector("#all-off").addEventListener("click", () => turnAllOff(list));
   bulkActions
     .querySelector("#restore-defaults")
     .addEventListener("click", () => applyDefaults(list));
