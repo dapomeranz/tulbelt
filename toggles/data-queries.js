@@ -25,6 +25,12 @@
 // toggles/data-queries-model.js, which replicates @locus-ot/tulip-api's
 // contract. This file is the UI over that model and owns no query semantics.
 //
+// The page has two faces. A saved query opens in *use* mode — its name, its
+// [Name] search boxes, and Export CSV — and the ✎ pencil swaps in the builder:
+// name, table, filters, sort, columns, with Save and Cancel. A query that has
+// not been saved yet lives in the builder until it is. docs/toggles.md has the
+// walkthrough.
+//
 (() => {
   const { registerToggle, ensureStyles, removeStyles } = window.__tulbeltLib;
   const model = window.__tulbeltDataQueriesModel;
@@ -56,6 +62,9 @@
     query: null,
     columns: [], // [{ name, label, dataType }] filterable/sortable targets
     columnTypes: {}, // name -> dataType, for operator narrowing and coercion
+    // Field ids the table has archived. Records still carry their values, so
+    // the grid and the CSV strike these keys; see archivedColumnsFromMeta().
+    archivedColumns: new Set(),
     tableName: "",
     loading: false,
     error: "",
@@ -72,10 +81,14 @@
     exporting: false,
     exportCount: 0, // records fetched so far, for the in-progress readout
     cancelExport: false,
-    // The point of this page is grabbing a saved query and seeing rows, so the
-    // builder starts folded away on every query you open — filters are the
-    // exception, not the entry point.
-    optionsOpen: false,
+    // Two faces, not one page with a fold. A saved query opens in *use* mode —
+    // its name, its search boxes, and Export — because the errand here is
+    // grabbing rows, not editing; the pencil swaps in the builder. A query with
+    // no id yet has nothing to use, so it is always in the builder (isEditing).
+    editing: false,
+    // The column chooser's popover. On state rather than in a closure because
+    // every tick re-renders (the grid narrows live) and it has to come back open.
+    columnsOpen: false,
     importing: false,
     // The picker's table list: null until the first load settles, then an
     // array (possibly empty). `tablesError` explains a short list; it is a
@@ -89,6 +102,11 @@
     // search in place — but is never persisted: a saved query is a template,
     // not somebody's last search. Opening a different query clears it.
     inputs: {},
+    // A header click's sort: { sortBy, sortDir } while one is in force, else
+    // null for the query's own default. Same life as `inputs` — part of using
+    // the query, never part of it — so it is not saved, and a different query
+    // starts without it.
+    viewSort: null,
   };
 
   // Set by the mounted table picker so an async list load can repopulate its
@@ -212,18 +230,37 @@
     }
   }
 
+  // Archived is a soft delete in Tulip — a table gets `deletedAt`, a column
+  // `hidden` — but these are private endpoints whose shapes we have
+  // second-hand, so every spelling of "gone" counts. Nothing archived is ever
+  // listed, offered as a filter target or column, or shown in the grid or the
+  // CSV, whatever the payload calls it. docs/probes/archived-flags-probe.js
+  // prints what a tenant actually sends.
+  const isArchived = (item) =>
+    Boolean(
+      item.deleted ||
+        item.deletedAt ||
+        item.archived ||
+        item.isArchived ||
+        item.archivedAt ||
+        item.hidden ||
+        String(item.status || "").toLowerCase() === "archived",
+    );
+
   // A private endpoint whose response shape we have second-hand: read the id
   // and label defensively and drop anything without an id, rather than let one
-  // odd row poison the list.
+  // odd row poison the list. Archived tables come through flagged, not dropped,
+  // so mergeTables() can also strike them from the recents.
   function tablesFromList(payload) {
     const items = Array.isArray(payload) ? payload : payload?.tables || payload?.items || [];
     if (!Array.isArray(items)) return [];
     return items
-      .filter((t) => t && !t.deleted)
+      .filter((t) => t)
       .map((t) => ({
         id: t.id || t.tableId || t._id,
         name: t.label || t.name || t.displayName || "",
         recent: false,
+        archived: isArchived(t),
       }))
       .filter((t) => typeof t.id === "string" && t.id);
   }
@@ -246,9 +283,15 @@
   // A recent's own url carries a workspace *slug*, not the number the API
   // wants, so a recent the list doesn't cover falls back to the ambient
   // workspace — the same assumption the page made before the picker existed.
+  // An archived table is dropped from both halves: the list says so outright,
+  // and a recent the list marks archived was opened before it went away.
   function mergeTables(recents, listed, ambientWsId = "") {
+    const archived = new Set(listed.filter((t) => t.archived).map((t) => t.id));
+    listed = listed.filter((t) => !t.archived);
     const byId = new Map(listed.map((t) => [t.id, t]));
-    const recent = recents.map((r) => ({
+    const recent = recents
+      .filter((r) => !archived.has(r.id))
+      .map((r) => ({
       ...r,
       name: byId.get(r.id)?.name || r.name,
       wsId: byId.get(r.id)?.wsId || r.wsId || ambientWsId,
@@ -316,7 +359,7 @@
     const cols = meta?.columns || meta?.fields || [];
     if (!Array.isArray(cols)) return [];
     return cols
-      .filter((c) => c && !c.hidden && !c.deleted)
+      .filter((c) => c && !isArchived(c))
       .map((c) => ({
         name: c.fieldId || c.name || c.id,
         label: c.label || c.displayName || c.name,
@@ -325,32 +368,57 @@
       .filter((c) => typeof c.name === "string" && c.name);
   }
 
+  // The other half of the metadata: fields that have been archived. Records
+  // still carry values for them, so the grid has to know which keys to drop.
+  function archivedColumnsFromMeta(meta) {
+    const cols = meta?.columns || meta?.fields || [];
+    if (!Array.isArray(cols)) return new Set();
+    return new Set(
+      cols
+        .filter((c) => c && isArchived(c))
+        .map((c) => c.fieldId || c.name || c.id)
+        .filter((name) => typeof name === "string" && name),
+    );
+  }
+
   function labelFor(key) {
     const col = state.columns.find((c) => c.name === key);
     if (col?.label) return col.label;
     return META_LABELS[key] || labelFromFieldId(key);
   }
 
-  // Records omit fields they have no value for, so the column set is the union
-  // across the page — but the *order* is the table's own field order, the
-  // sequence the metadata call hands back, which is how the columns read on
-  // Tulip's own table page. Only fields the metadata didn't mention fall back
-  // to first-seen order, and they sort after the ones it did. `id` leads,
-  // Tulip's own record fields trail.
+  // Records omit fields they have no value for, so with no column selection the
+  // set is the union across the page. With one, the header *is* the selection:
+  // a chosen column shows even when no row on this page has a value for it, so
+  // the grid — and the CSV — carry the same columns from one page to the next.
+  // A selected column the table no longer has is skipped rather than shown
+  // empty; if nothing survives, the grid says so instead of guessing. Archived
+  // fields never make a column either way — records still carry their values,
+  // the metadata says they are gone, and the metadata wins.
+  //
+  // Either way the *order* is the table's own field order, the sequence the
+  // metadata call hands back, which is how the columns read on Tulip's own
+  // table page. Only fields the metadata didn't mention fall back to
+  // first-seen order, and they sort after the ones it did. `id` leads, Tulip's
+  // own record fields trail.
   function resultColumns(rows) {
     const seen = new Set();
-    for (const row of rows) for (const k of Object.keys(row)) seen.add(k);
+    for (const row of rows) {
+      for (const k of Object.keys(row)) if (!state.archivedColumns.has(k)) seen.add(k);
+    }
     const order = new Map(state.columns.map((c, i) => [c.name, i]));
+    const chosen = state.query.columns;
+    const keys = chosen ? chosen.filter((k) => order.has(k) || seen.has(k)) : [...seen];
     const rank = (k) => (order.has(k) ? order.get(k) : Number.MAX_SAFE_INTEGER);
-    const userKeys = [...seen]
+    const userKeys = keys
       .filter((k) => k !== "id" && !META_FIELDS.includes(k))
       .map((k, i) => ({ k, i }))
       .sort((a, b) => rank(a.k) - rank(b.k) || a.i - b.i)
       .map((e) => e.k);
     return [
-      ...(seen.has("id") ? ["id"] : []),
+      ...(keys.includes("id") ? ["id"] : []),
       ...userKeys,
-      ...META_FIELDS.filter((k) => seen.has(k)),
+      ...META_FIELDS.filter((k) => keys.includes(k)),
     ].map((key) => ({ key, label: labelFor(key) }));
   }
 
@@ -414,10 +482,20 @@
     return tableId;
   }
 
+  // The sort the request actually carries: a header click's while one is in
+  // force, else the query's own default. Shared by the grid, paging and Export,
+  // so the CSV is the view, not the configuration.
+  const effectiveSort = () => (state.viewSort ? [state.viewSort] : state.query.sortOptions);
+
   const paramsFor = (offset) =>
     model.queryToParams(
-      { ...state.query, columnTypes: state.columnTypes, inputs: state.inputs },
-      { offset }
+      {
+        ...state.query,
+        sortOptions: effectiveSort(),
+        columnTypes: state.columnTypes,
+        inputs: state.inputs,
+      },
+      { offset },
     );
 
   // Every response shape Tulip has handed back for a records call.
@@ -459,8 +537,8 @@
       // A newer run started while this one was in flight; its answer wins.
       if (seq !== runSeq) return;
       if (needsSchema) {
-        const cols = columnsFromMeta(meta);
-        setColumns(cols);
+        setColumns(columnsFromMeta(meta));
+        state.archivedColumns = archivedColumnsFromMeta(meta);
         state.tableName = meta?.label || meta?.name || "";
         if (!meta) {
           state.hint =
@@ -581,6 +659,13 @@
   async function exportCsv() {
     const tableId = prepare();
     if (!tableId) return;
+    // Deselect-all is a legitimate step toward picking a few, but not a file.
+    if (Array.isArray(state.query.columns) && state.query.columns.length === 0) {
+      state.error =
+        "No columns selected — every one is unticked. Pick at least one in the editor.";
+      render();
+      return;
+    }
 
     state.exporting = true;
     state.cancelExport = false;
@@ -663,10 +748,13 @@
     persist();
     state.error = "";
     state.savedFlash = `Saved “${saved.name}”.`;
+    // Save is also "done editing": the query goes back to its use face.
+    state.editing = false;
+    state.columnsOpen = false;
     render();
   }
 
-  function loadSaved(id, flash = "") {
+  function loadSaved(id, flash = "", { keepView = false } = {}) {
     const saved = state.store.queries.find((q) => q.id === id);
     if (!saved) return;
     state.query = model.fromSaved(saved);
@@ -677,12 +765,18 @@
     state.savedFlash = "";
     state.confirmDeleteId = null;
     state.importing = false;
-    state.optionsOpen = false;
-    // Another query's search terms have no meaning here.
-    state.inputs = {};
+    state.editing = false;
+    state.columnsOpen = false;
+    // Another query's search terms and header sort have no meaning here.
+    // (Cancelling an edit re-opens the same query, and keeps them.)
+    if (!keepView) {
+      state.inputs = {};
+      state.viewSort = null;
+    }
     // A different table means the columns in hand no longer describe it.
     state.columns = [];
     state.columnTypes = {};
+    state.archivedColumns = new Set();
     state.tableName = "";
     // The run clears the flash on its way through, so it lands afterwards.
     run({ reloadSchema: true }).then(() => {
@@ -701,13 +795,54 @@
     state.savedFlash = "";
     state.confirmDeleteId = null;
     state.importing = false;
-    state.optionsOpen = false;
+    state.editing = true;
+    state.columnsOpen = false;
     state.inputs = {};
+    state.viewSort = null;
     render();
     // The table is carried over, so a new query has an answer straight away:
     // that table, unfiltered.
     autoRun();
   }
+
+  // Cancel in the builder: the saved version comes back and the page returns
+  // to use mode. It is a plain re-open of the query, so a table switched
+  // mid-edit reloads its own columns — the only things kept are the search
+  // terms and header sort, which the edit never had any claim on.
+  function cancelEdit() {
+    if (!state.store.queries.some((q) => q.id === state.query.id)) return;
+    loadSaved(state.query.id, "", { keepView: true });
+  }
+
+  // ── Grid sort ───────────────────────────────────────────────────────────────
+
+  // The sort the grid is showing: a header click's while one is in force, else
+  // the query's own default. Drives the header arrows.
+  function activeSort() {
+    if (state.viewSort) return state.viewSort;
+    const [first] = state.query.sortOptions || [];
+    return first ? { sortBy: first.sortBy, sortDir: first.sortDir } : null;
+  }
+
+  // A header click sorts ascending; a second click on the same header flips
+  // it. Nothing about this touches the query — it goes back out over the API
+  // as a fresh request with the same filters and search terms, from page one,
+  // so it is the whole answer sorted and not just the page in hand.
+  function sortBy(key) {
+    const current = activeSort();
+    const dir = current && current.sortBy === key && current.sortDir === "asc" ? "desc" : "asc";
+    state.viewSort = { sortBy: key, sortDir: dir };
+    run({ page: 0 });
+  }
+
+  function resetSort() {
+    state.viewSort = null;
+    run({ page: 0 });
+  }
+
+  // Unsaved queries have no "use" face — nothing to hand back — so they are
+  // always in the builder, whatever `editing` says.
+  const isEditing = () => state.editing || !state.query.id;
 
   // ── UI ──────────────────────────────────────────────────────────────────────
 
@@ -808,11 +943,14 @@
     return wrap;
   }
 
+  // Editing the default sort also lifts any header sort, so the grid shows
+  // what was just chosen rather than a click from earlier.
   function renderSortRow(sort, index) {
     const wrap = el("div", "dq-row");
     wrap.appendChild(
       select("dq-select dq-field", fieldOptions(), sort.sortBy, (v) => {
         sort.sortBy = v;
+        state.viewSort = null;
         autoRun();
       }),
     );
@@ -826,6 +964,7 @@
         sort.sortDir,
         (v) => {
           sort.sortDir = v;
+          state.viewSort = null;
           autoRun();
         },
       ),
@@ -835,6 +974,7 @@
     remove.title = "Remove this sort";
     remove.addEventListener("click", () => {
       state.query.sortOptions.splice(index, 1);
+      state.viewSort = null;
       render();
       autoRun();
     });
@@ -842,17 +982,25 @@
     return wrap;
   }
 
-  // A one-line read of what is folded away, so the collapsed state still says
-  // what the query does.
+  // A one-line read of the query, for the use panel's subtitle and the saved
+  // list: what it filters on, how it sorts, and — only when narrowed — which
+  // columns it keeps.
   function optionsSummary() {
     const filters = state.query.rows.filter((r) => r.field).length;
     const sorts = state.query.sortOptions
       .map((o) => `${labelFor(o.sortBy)} ${o.sortDir === "asc" ? "↑" : "↓"}`)
       .join(", ");
-    return [
+    const parts = [
       filters === 0 ? "no filters" : `${filters} filter${filters === 1 ? "" : "s"}`,
-      sorts ? `sorted by ${sorts}` : "unsorted",
-    ].join(" · ");
+      sorts ? `default sort ${sorts}` : "no default sort",
+    ];
+    const chosen = state.query.columns;
+    if (chosen) {
+      const total = state.columns.length;
+      const n = total ? chosen.filter((k) => k in state.columnTypes).length : chosen.length;
+      parts.push(total ? `${n} of ${total} columns` : `${n} column${n === 1 ? "" : "s"}`);
+    }
+    return parts.join(" · ");
   }
 
   // ── Table picker ────────────────────────────────────────────────────────────
@@ -868,6 +1016,19 @@
   function renderTablePicker() {
     const row = el("div", "dq-table-row");
     const combo = el("div", "dq-combo");
+
+    // The table this picker was rendered against. A column selection only
+    // means anything for the table it was made on, so switching tables drops
+    // it; re-loading the same table keeps it.
+    const before = parseTableId(state.query.tableId);
+    const load = () => {
+      if (parseTableId(state.query.tableId) !== before) {
+        state.query.columns = null;
+        state.columnsOpen = false;
+        state.viewSort = null;
+      }
+      run({ reloadSchema: true });
+    };
 
     const input = el("input", "dq-input dq-table-input");
     input.type = "text";
@@ -921,7 +1082,7 @@
       close();
       // Picking is the whole gesture — nobody picks a table and then wants to
       // press Load.
-      run({ reloadSchema: true });
+      load();
     }
 
     function fill() {
@@ -1005,7 +1166,7 @@
         // what Enter did before the picker existed.
         if (isOpen() && active >= 0 && shown[active]) return pick(shown[active]);
         close();
-        run({ reloadSchema: true });
+        load();
       } else if (e.key === "Escape" && isOpen()) {
         // Don't let it bubble — the page shell may act on Escape too.
         e.stopPropagation();
@@ -1053,7 +1214,7 @@
     loadBtn.title = "Fetch this table's columns, then run the query";
     loadBtn.addEventListener("click", () => {
       close();
-      run({ reloadSchema: true });
+      load();
     });
 
     showName();
@@ -1067,7 +1228,21 @@
   }
 
   function renderBuilder() {
-    const box = el("section", "dq-builder");
+    const box = el("section", "dq-panel dq-builder");
+
+    // Says which face of the page this is — the accent bar does the rest.
+    const head = el("div", "dq-builder-head");
+    head.appendChild(el("span", "dq-eyebrow", state.query.id ? "Editing query" : "New query"));
+    if (state.query.id) {
+      head.appendChild(
+        el(
+          "span",
+          "dq-note",
+          "The grid follows every change; Save keeps them, Cancel puts the saved version back.",
+        ),
+      );
+    }
+    box.appendChild(head);
 
     // Name. Up top because it is the query's identity, and because naming it is
     // what turns a one-off into something the list can hand back later.
@@ -1093,23 +1268,6 @@
       return box;
     }
 
-    // Filters and sort, folded away by default.
-    const disclosure = el("button", "dq-disclosure");
-    disclosure.type = "button";
-    disclosure.setAttribute("aria-expanded", String(state.optionsOpen));
-    disclosure.appendChild(el("span", "dq-caret", state.optionsOpen ? "▾" : "▸"));
-    disclosure.appendChild(el("span", null, "Filters & sort"));
-    disclosure.appendChild(el("span", "dq-disclosure-meta", optionsSummary()));
-    disclosure.addEventListener("click", () => {
-      state.optionsOpen = !state.optionsOpen;
-      render();
-    });
-    box.appendChild(disclosure);
-
-    const opts = el("div", "dq-options");
-    if (!state.optionsOpen) opts.hidden = true;
-    box.appendChild(opts);
-
     // Filters.
     const filterHead = el("div", "dq-section-head");
     filterHead.appendChild(el("span", null, "Match"));
@@ -1128,14 +1286,14 @@
       ),
     );
     filterHead.appendChild(el("span", null, "of these filters:"));
-    opts.appendChild(filterHead);
+    box.appendChild(filterHead);
 
     const filters = el("div", "dq-rows");
     state.query.rows.forEach((row, i) => filters.appendChild(renderFilterRow(row, i)));
     if (state.query.rows.length === 0) {
       filters.appendChild(el("p", "dq-hint", "No filters — every record is returned."));
     }
-    opts.appendChild(filters);
+    box.appendChild(filters);
 
     const addFilter = el("button", "dq-btn dq-btn-small", "+ Add filter");
     addFilter.type = "button";
@@ -1143,72 +1301,272 @@
       state.query.rows.push({ field: "", functionType: "", value: "" });
       render();
     });
-    opts.appendChild(addFilter);
+    box.appendChild(addFilter);
 
-    // Sort.
-    opts.appendChild(el("div", "dq-section-head", "Sort by:"));
+    // Default sort — the order the query opens in. A header click on the grid
+    // overrides it for the moment without touching it.
+    box.appendChild(el("div", "dq-section-head", "Default sort:"));
     const sorts = el("div", "dq-rows");
     state.query.sortOptions.forEach((s, i) => sorts.appendChild(renderSortRow(s, i)));
     if (state.query.sortOptions.length === 0) {
-      sorts.appendChild(el("p", "dq-hint", "Unsorted — Tulip's default order."));
+      sorts.appendChild(
+        el("p", "dq-hint", "No default sort — Tulip's own order. Click a column header to sort the grid."),
+      );
     }
-    opts.appendChild(sorts);
+    box.appendChild(sorts);
 
     const addSort = el("button", "dq-btn dq-btn-small", "+ Add sort");
     addSort.type = "button";
     addSort.addEventListener("click", () => {
       state.query.sortOptions.push({ sortBy: state.columns[0].name, sortDir: "desc" });
+      state.viewSort = null;
       render();
       autoRun();
     });
-    opts.appendChild(addSort);
+    box.appendChild(addSort);
 
-    // Actions.
+    // Columns.
+    box.appendChild(el("div", "dq-section-head", "Columns:"));
+    box.appendChild(renderColumnChooser());
+
+    // Actions. Save leads: it is what the builder is for; Export lives with
+    // the pager above the grid, in both faces of the page.
     const actions = el("div", "dq-actions");
 
+    const saveBtn = el(
+      "button",
+      "dq-btn dq-btn-primary dq-btn-save",
+      state.query.id ? "Save" : "Save query",
+    );
+    saveBtn.type = "button";
+    saveBtn.disabled = !state.query.name.trim();
+    saveBtn.title = state.query.name.trim()
+      ? "Save and go back to using the query"
+      : "Name the query up top to save it";
+    saveBtn.addEventListener("click", saveCurrent);
+    actions.appendChild(saveBtn);
+
+    if (state.query.id) {
+      const cancelBtn = el("button", "dq-btn", "Cancel");
+      cancelBtn.type = "button";
+      cancelBtn.title = "Drop these changes and go back to the saved version";
+      cancelBtn.addEventListener("click", cancelEdit);
+      actions.appendChild(cancelBtn);
+    }
+
+    const note = renderRunNote();
+    if (note) actions.appendChild(note);
+
+    box.appendChild(actions);
+    return box;
+  }
+
+  // Export CSV plus, mid-export, the running count and a Cancel. Sits in the
+  // pager beside Prev, so the whole answer is one step from the page of it you
+  // are looking at — in both faces of the page.
+  function renderExportControls() {
+    const nodes = [];
     const exportBtn = el(
       "button",
-      "dq-btn dq-btn-primary",
+      "dq-btn dq-btn-primary dq-btn-page",
       state.exporting ? "Exporting…" : "Export CSV",
     );
     exportBtn.type = "button";
     exportBtn.title = "Page through every matching record and download them all as a CSV";
     exportBtn.disabled = state.loading || state.exporting;
     exportBtn.addEventListener("click", exportCsv);
-    actions.appendChild(exportBtn);
+    nodes.push(exportBtn);
 
     if (state.exporting) {
-      actions.appendChild(el("span", "dq-note", `${state.exportCount} fetched…`));
+      nodes.push(el("span", "dq-note", `${state.exportCount} fetched…`));
       const cancelBtn = el("button", "dq-btn dq-btn-small", "Cancel");
       cancelBtn.type = "button";
       // Takes effect between pages; the request already in flight still lands.
       cancelBtn.addEventListener("click", () => {
         state.cancelExport = true;
       });
-      actions.appendChild(cancelBtn);
+      nodes.push(cancelBtn);
     }
+    return nodes;
+  }
 
-    const saveBtn = el("button", "dq-btn dq-btn-save", state.query.id ? "Save" : "Save query");
-    saveBtn.type = "button";
-    saveBtn.disabled = !state.query.name.trim();
-    saveBtn.title = state.query.name.trim() ? "" : "Name the query up top to save it";
-    saveBtn.addEventListener("click", saveCurrent);
-    actions.appendChild(saveBtn);
+  // Why the grid isn't already showing this query's answer.
+  function renderRunNote() {
+    if (state.loading) return el("span", "dq-note", "Running…");
+    if (state.pending) return el("span", "dq-note", state.pending);
+    return null;
+  }
 
-    // Why the grid isn't already showing this query's answer.
-    if (state.loading) actions.appendChild(el("span", "dq-note", "Running…"));
-    else if (state.pending) actions.appendChild(el("span", "dq-note", state.pending));
+  // ── Column chooser ──────────────────────────────────────────────────────────
 
-    box.appendChild(actions);
+  // Which columns the grid and the CSV carry. Purely client-side: the records
+  // call has no projection parameter, so every field still comes down the wire
+  // and this only decides what is shown and exported. `null` means everything,
+  // and a fully-ticked list normalises back to it — so a query saved with every
+  // column ticked keeps showing columns added to the table later, rather than
+  // freezing the list it saw at save time. An empty list is honoured as "none",
+  // which the grid reports rather than quietly widening.
+  const knownColumnNames = () => state.columns.map((c) => c.name);
+
+  function setColumnSelection(names) {
+    const all = knownColumnNames();
+    const picked = new Set(names);
+    state.query.columns = all.every((n) => picked.has(n))
+      ? null
+      : all.filter((n) => picked.has(n));
+    // The grid narrows straight away — the rows are the same, only the header
+    // changes, so there is nothing to fetch.
+    if (state.result) state.result.columns = resultColumns(state.result.rows);
+    render();
+  }
+
+  function renderColumnChooser() {
+    const wrap = el("div", "dq-cols");
+    const all = knownColumnNames();
+    const chosen = state.query.columns;
+    const ticked = new Set(chosen ? chosen.filter((n) => all.includes(n)) : all);
+
+    const btn = el("button", "dq-btn dq-cols-btn");
+    btn.type = "button";
+    btn.setAttribute("aria-haspopup", "true");
+    btn.setAttribute("aria-expanded", String(state.columnsOpen));
+    const caret = el("span", "dq-caret", state.columnsOpen ? "▾" : "▸");
+    btn.appendChild(caret);
+    btn.appendChild(
+      el(
+        "span",
+        null,
+        chosen ? `${ticked.size} of ${all.length} columns` : `All ${all.length} columns`,
+      ),
+    );
+    btn.title = "Choose which columns the grid shows and the CSV includes";
+    btn.addEventListener("click", () => {
+      state.columnsOpen = !state.columnsOpen;
+      render();
+    });
+    wrap.appendChild(btn);
+
+    if (!state.columnsOpen) return wrap;
+
+    const panel = el("div", "dq-cols-panel");
+    panel.setAttribute("role", "group");
+    panel.setAttribute("aria-label", "Columns");
+
+    // Closing without a render, for the paths where a render would pull the
+    // thing being clicked out from under the click (outside mousedown) or drop
+    // the keyboard focus somewhere unhelpful (Escape).
+    const closeQuietly = () => {
+      state.columnsOpen = false;
+      panel.remove();
+      btn.setAttribute("aria-expanded", "false");
+      caret.textContent = "▸";
+    };
+
+    const tools = el("div", "dq-cols-tools");
+    const selectAll = el("button", "dq-btn dq-btn-small", "Select all");
+    selectAll.type = "button";
+    selectAll.addEventListener("click", () => setColumnSelection(all));
+    const clearAll = el("button", "dq-btn dq-btn-small", "Deselect all");
+    clearAll.type = "button";
+    clearAll.addEventListener("click", () => setColumnSelection([]));
+    tools.appendChild(selectAll);
+    tools.appendChild(clearAll);
+    panel.appendChild(tools);
+
+    const list = el("div", "dq-cols-list");
+    for (const col of state.columns) {
+      const row = el("label", "dq-cols-opt");
+      const cb = el("input");
+      cb.type = "checkbox";
+      cb.checked = ticked.has(col.name);
+      // Each tick re-renders; this key puts the focus back on the same box so
+      // Space, Tab, Space walks the list.
+      cb.dataset.dqFocus = `col:${col.name}`;
+      cb.addEventListener("change", () => {
+        const next = new Set(ticked);
+        if (cb.checked) next.add(col.name);
+        else next.delete(col.name);
+        setColumnSelection([...next]);
+      });
+      row.appendChild(cb);
+      row.appendChild(el("span", "dq-cols-label", col.label || col.name));
+      if (col.label && col.label !== col.name) row.appendChild(el("span", "dq-cols-tag", col.name));
+      list.appendChild(row);
+    }
+    panel.appendChild(list);
+
+    const foot = el("div", "dq-cols-foot");
+    foot.appendChild(el("span", null, `${ticked.size} of ${all.length} selected`));
+    const done = el("button", "dq-btn dq-btn-small", "Done");
+    done.type = "button";
+    done.addEventListener("click", () => {
+      state.columnsOpen = false;
+      render();
+    });
+    foot.appendChild(done);
+    panel.appendChild(foot);
+
+    panel.addEventListener("keydown", (e) => {
+      if (e.key !== "Escape") return;
+      // Don't let it bubble — the page shell may act on Escape too.
+      e.stopPropagation();
+      closeQuietly();
+      btn.focus();
+    });
+
+    // Same outside-click discipline as the table picker: capture phase, and
+    // the listener unhooks itself once the node it guards has been rebuilt.
+    const onDocDown = (e) => {
+      if (!wrap.isConnected) return document.removeEventListener("mousedown", onDocDown, true);
+      if (!wrap.contains(e.target)) closeQuietly();
+    };
+    document.addEventListener("mousedown", onDocDown, true);
+
+    wrap.appendChild(panel);
+    return wrap;
+  }
+
+  // ── Use panel ───────────────────────────────────────────────────────────────
+
+  // The face a saved query opens in: what it is and its search boxes; Export
+  // is up by the pager. Nothing here changes the query — that is what the
+  // pencil beside the name is for — so the table, filters, sort and columns
+  // read as a subtitle, not as fields.
+  function renderUsePanel() {
+    const box = el("section", "dq-panel dq-use");
+
+    const titleRow = el("div", "dq-use-title-row");
+    titleRow.appendChild(el("h2", "dq-use-name", state.query.name || "Untitled query"));
+    const edit = el("button", "dq-btn dq-btn-icon dq-edit", "✎");
+    edit.type = "button";
+    edit.title = "Edit this query — its table, filters, sort and columns";
+    edit.setAttribute("aria-label", "Edit query");
+    edit.addEventListener("click", () => {
+      state.editing = true;
+      state.savedFlash = "";
+      render();
+    });
+    titleRow.appendChild(edit);
+    const note = renderRunNote();
+    if (note) titleRow.appendChild(note);
+    box.appendChild(titleRow);
+
+    const where = state.tableName || tableNameFor(state.query.tableId) || state.query.tableId;
+    const meta = el("p", "dq-use-meta", `${where} · ${optionsSummary()}`);
+    meta.title = state.query.tableId;
+    box.appendChild(meta);
+
+    const inputBar = renderInputBar();
+    if (inputBar) box.appendChild(inputBar);
     return box;
   }
 
   // ── Search inputs ───────────────────────────────────────────────────────────
 
   // The boxes behind a query's `[Name]` placeholders. This is what turns a
-  // saved query into a search tool, so it sits above the grid and outside the
-  // "Filters & sort" disclosure — the builder stays folded away and these are
-  // the controls you actually see.
+  // saved query into a search tool, so in use mode they are the controls you
+  // see — inside the use panel, above the grid — and in the builder they sit
+  // underneath it so a placeholder can be tried as it is typed.
   //
   // A blank box means "don't narrow by this" rather than "match empty", so the
   // query runs with that filter left out entirely; all blank is the whole
@@ -1311,7 +1669,7 @@
   }
 
   function renderImportForm() {
-    const form = el("section", "dq-builder");
+    const form = el("section", "dq-panel");
     form.appendChild(el("h2", "dq-import-head", "Import queries"));
     form.appendChild(
       el(
@@ -1490,7 +1848,8 @@
     return cell;
   }
 
-  // Prev/Next over offset pages, sitting with the record count above the grid.
+  // Export CSV and Prev/Next over offset pages, sitting with the record count
+  // above the grid: the page you are on, and the way to get all of them.
   // No page count to show: a records call returns a page and no total, so the
   // only thing known about what's ahead is whether this page came back full.
   function renderPager(result) {
@@ -1500,6 +1859,8 @@
     // The page these rows came from, which during a fetch is not yet the page
     // state.page is heading for — the label has to agree with the grid under it.
     const page = Math.floor(result.offset / limit);
+
+    for (const node of renderExportControls()) pager.appendChild(node);
 
     const prev = el("button", "dq-btn dq-btn-page", "‹ Prev");
     prev.type = "button";
@@ -1521,7 +1882,7 @@
       el(
         "span",
         "dq-note",
-        state.loading ? "Fetching…" : `${limit} per page · Export CSV for every match`,
+        state.loading ? "Fetching…" : `${limit} per page`,
       ),
     );
     return pager;
@@ -1544,6 +1905,21 @@
       ),
     );
     summary.appendChild(renderPager(result));
+    // A header sort is in force: say so, and offer the way back. The default
+    // sort needs no note — the header arrow already shows it.
+    if (state.viewSort) {
+      const note = el("span", "dq-note dq-sort-note");
+      note.appendChild(
+        document.createTextNode(
+          `Sorted by ${labelFor(state.viewSort.sortBy)} ${state.viewSort.sortDir === "asc" ? "↑" : "↓"} · `,
+        ),
+      );
+      const reset = el("button", "dq-link", "back to the default sort");
+      reset.type = "button";
+      reset.addEventListener("click", resetSort);
+      note.appendChild(reset);
+      summary.appendChild(note);
+    }
     wrap.appendChild(summary);
 
     const inputNote = inputSummary();
@@ -1562,14 +1938,43 @@
       return wrap;
     }
 
+    if (result.columns.length === 0) {
+      wrap.appendChild(
+        el(
+          "p",
+          "dq-hint",
+          "No columns selected — every one is unticked. Edit the query and pick some.",
+        ),
+      );
+      return wrap;
+    }
+
     const scroller = el("div", "dq-scroll");
     const table = el("table", "dq-table");
     const thead = el("thead");
     const headRow = el("tr");
+    // Every header sorts: Tulip's records call takes any field as sortBy, so
+    // there is no column to leave inert.
+    const active = activeSort();
     for (const col of result.columns) {
-      const th = el("th", null, col.label);
+      const th = el("th", "dq-sortable");
+      th.appendChild(el("span", null, col.label));
+      const sorted = active && active.sortBy === col.key;
+      if (sorted) {
+        th.classList.add("dq-sorted");
+        th.appendChild(el("span", "dq-sort-ind", active.sortDir === "asc" ? "↑" : "↓"));
+        th.setAttribute("aria-sort", active.sortDir === "asc" ? "ascending" : "descending");
+      }
       // The raw field id is what you need when writing a query against it.
-      if (col.label !== col.key) th.title = col.key;
+      th.title = col.label !== col.key ? `${col.key} — click to sort` : "Click to sort";
+      th.tabIndex = 0;
+      th.setAttribute("role", "button");
+      th.addEventListener("click", () => sortBy(col.key));
+      th.addEventListener("keydown", (e) => {
+        if (e.key !== "Enter" && e.key !== " ") return;
+        e.preventDefault();
+        sortBy(col.key);
+      });
       headRow.appendChild(th);
     }
     thead.appendChild(headRow);
@@ -1628,11 +2033,15 @@
       restoreFocus(focus);
       return;
     }
-    main.appendChild(renderBuilder());
-    // Between the builder and the grid: the builder is what you fold away, the
-    // search boxes are what you come back to.
-    const inputBar = renderInputBar();
-    if (inputBar) main.appendChild(inputBar);
+    if (isEditing()) {
+      main.appendChild(renderBuilder());
+      // The search boxes stay under the builder while editing, so a [Name]
+      // placeholder can be tried the moment it is typed.
+      const inputBar = renderInputBar();
+      if (inputBar) main.appendChild(inputBar);
+    } else {
+      main.appendChild(renderUsePanel());
+    }
     if (state.error) main.appendChild(el("div", "dq-banner", state.error));
     if (state.hint) main.appendChild(el("div", "dq-note-banner", state.hint));
     if (state.savedFlash) main.appendChild(el("div", "dq-flash", state.savedFlash));
@@ -1665,7 +2074,31 @@
       #${CONTAINER_ID} .dq-saved-name { font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
       #${CONTAINER_ID} .dq-saved-meta { color: #788293; font-size: 0.85em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
       #${CONTAINER_ID} .dq-main { flex: 1 1 auto; min-width: 0; }
-      #${CONTAINER_ID} .dq-builder { border: 1px solid #d5dae2; border-radius: 6px; padding: 14px 16px; }
+      #${CONTAINER_ID} .dq-panel { border: 1px solid #d5dae2; border-radius: 6px; padding: 14px 16px; background: #fff; }
+      /* The two faces of the page. Use is a plain card; the builder wears an
+         accent bar and a tint so that being in it is never a surprise. */
+      #${CONTAINER_ID} .dq-builder { border-color: #c9dcf7; border-left: 4px solid #1c69e1; background: #fbfcfe; }
+      #${CONTAINER_ID} .dq-builder-head { display: flex; gap: 12px; align-items: baseline; flex-wrap: wrap; margin-bottom: 10px; }
+      #${CONTAINER_ID} .dq-eyebrow { font-size: 0.75em; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; color: #1c69e1; }
+      #${CONTAINER_ID} .dq-use-title-row { display: flex; gap: 10px; align-items: center; min-width: 0; }
+      #${CONTAINER_ID} .dq-use-name { margin: 0; min-width: 0; font-size: 1.25em; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      #${CONTAINER_ID} .dq-use-meta { margin: 4px 0 0; color: #788293; font-size: 0.9em; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      #${CONTAINER_ID} .dq-edit { flex: 0 0 auto; font-size: 1.1em; padding: 3px 8px; line-height: 1; }
+      #${CONTAINER_ID} .dq-pager .dq-btn-small { margin-top: 0; padding: 3px 10px; }
+      #${CONTAINER_ID} .dq-pager .dq-btn-primary { margin-right: 6px; }
+      #${CONTAINER_ID} .dq-caret { color: #788293; }
+      #${CONTAINER_ID} .dq-cols { position: relative; display: inline-block; }
+      #${CONTAINER_ID} .dq-cols-btn { display: inline-flex; gap: 8px; align-items: baseline; }
+      #${CONTAINER_ID} .dq-cols-panel { position: absolute; z-index: 5; top: calc(100% + 4px); left: 0; width: 340px; max-height: 340px; display: flex; flex-direction: column; background: #fff; border: 1px solid #d5dae2; border-radius: 6px; box-shadow: 0 6px 20px rgba(23, 33, 51, 0.14); }
+      #${CONTAINER_ID} .dq-cols-tools { display: flex; gap: 6px; padding: 8px 10px; border-bottom: 1px solid #e8edf5; }
+      #${CONTAINER_ID} .dq-cols-tools .dq-btn-small, #${CONTAINER_ID} .dq-cols-foot .dq-btn-small { margin-top: 0; }
+      #${CONTAINER_ID} .dq-cols-list { overflow-y: auto; padding: 4px 0; }
+      #${CONTAINER_ID} .dq-cols-opt { display: flex; gap: 8px; align-items: center; padding: 5px 10px; cursor: pointer; }
+      #${CONTAINER_ID} .dq-cols-opt:hover { background: #f6f8fb; }
+      #${CONTAINER_ID} .dq-cols-opt input { margin: 0; flex: 0 0 auto; }
+      #${CONTAINER_ID} .dq-cols-label { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      #${CONTAINER_ID} .dq-cols-tag { flex: 0 0 auto; max-width: 40%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #aab2bf; font-size: 0.8em; }
+      #${CONTAINER_ID} .dq-cols-foot { position: sticky; bottom: 0; display: flex; justify-content: space-between; align-items: center; padding: 6px 10px; border-top: 1px solid #e8edf5; background: #f6f8fb; color: #788293; font-size: 0.8em; }
       #${CONTAINER_ID} .dq-table-row { display: flex; gap: 8px; align-items: center; margin-bottom: 12px; }
       #${CONTAINER_ID} .dq-table-input { flex: 1 1 auto; min-width: 0; padding-right: 28px; }
       #${CONTAINER_ID} .dq-table-name { color: #45526b; font-weight: 600; }
@@ -1704,12 +2137,6 @@
       #${CONTAINER_ID} .dq-actions { display: flex; gap: 8px; align-items: center; margin-top: 16px; padding-top: 12px; border-top: 1px solid #e8edf5; flex-wrap: wrap; }
       #${CONTAINER_ID} .dq-name { display: block; width: 100%; max-width: 420px; box-sizing: border-box; margin-bottom: 10px; font-size: 1.15em; font-weight: 600; }
       #${CONTAINER_ID} .dq-name::placeholder { font-weight: 400; color: #aab2bf; }
-      #${CONTAINER_ID} .dq-disclosure { display: flex; gap: 8px; align-items: baseline; width: 100%; margin-top: 14px; padding: 8px 10px; border: 1px solid #d5dae2; border-radius: 6px; background: #f6f8fb; color: inherit; font: inherit; font-weight: 600; text-align: left; cursor: pointer; }
-      #${CONTAINER_ID} .dq-disclosure:hover { border-color: #1c69e1; }
-      #${CONTAINER_ID} .dq-caret { color: #788293; }
-      #${CONTAINER_ID} .dq-disclosure-meta { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 400; font-size: 0.9em; color: #788293; }
-      #${CONTAINER_ID} .dq-options { display: block; padding-left: 2px; }
-      #${CONTAINER_ID} .dq-options[hidden] { display: none; }
       #${CONTAINER_ID} .dq-saved-tools { display: flex; gap: 6px; }
       #${CONTAINER_ID} .dq-saved-tools .dq-btn { flex: 1 1 auto; }
       #${CONTAINER_ID} .dq-import-head { margin: 0 0 6px; font-size: 1.1em; }
@@ -1740,6 +2167,12 @@
       #${CONTAINER_ID} .dq-table { border-collapse: collapse; width: 100%; }
       #${CONTAINER_ID} .dq-table th, #${CONTAINER_ID} .dq-table td { text-align: left; padding: 6px 10px; border-bottom: 1px solid #e8edf5; vertical-align: top; }
       #${CONTAINER_ID} .dq-table th { background: #f6f8fb; font-size: 0.85em; text-transform: uppercase; letter-spacing: 0.03em; color: #45526b; white-space: nowrap; }
+      #${CONTAINER_ID} .dq-sortable { cursor: pointer; user-select: none; }
+      #${CONTAINER_ID} .dq-sortable:hover { color: #1c69e1; }
+      #${CONTAINER_ID} .dq-sortable:focus-visible { outline: 2px solid #1c69e1; outline-offset: -2px; }
+      #${CONTAINER_ID} .dq-sorted { color: #1c69e1; }
+      #${CONTAINER_ID} .dq-sort-ind { margin-left: 4px; }
+      #${CONTAINER_ID} .dq-link { border: 0; background: none; padding: 0; font: inherit; color: #1c69e1; cursor: pointer; text-decoration: underline; }
       #${CONTAINER_ID} .dq-table tbody tr:hover { background: #f9fbfe; }
       #${CONTAINER_ID} .dq-table tr:last-child td { border-bottom: none; }
       #${CONTAINER_ID} .dq-cell { max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

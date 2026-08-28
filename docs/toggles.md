@@ -77,12 +77,22 @@ see [the shared page shell](#the-tulbelt-page-shell) below). Paste a table id �
 `Sb28KTCAWbt6PLm5f` — or a whole table URL and hit **Load table** to fetch its
 columns, then build a query against them and save it under a name.
 
+**Two faces: use and edit.** Opening a saved query shows its _use_ face — the
+name with a **✎** pencil beside it, a one-line summary (`Orders · 3 filters ·
+sorted by Created ↓ · 5 of 12 columns`), and its search boxes; **Export CSV**
+sits in the pager above the grid, beside **‹ Prev**, in both faces. Nothing in
+the use face changes the query; the common errand is grabbing a saved query and
+reading rows.
+The pencil swaps in the _builder_ — accent bar, "Editing query" — with the name,
+the table picker, every filter and sort row, the column chooser, **Save** and
+**Cancel**. Save keeps the changes and returns to the use face; Cancel re-opens
+the saved version (text in the search boxes survives). **+ New query** and a
+query that hasn't been saved yet are always in the builder — there is nothing to
+use until it has a name.
+
 **The builder.** Filter rows are _field · operator · value_, matched on **all**
-or **any**, plus sort rows. The query's name sits at the top of the builder, and
-the filter and sort rows are folded behind a **Filters & sort** disclosure that
-starts collapsed on every query you open — the common errand here is grabbing a
-saved query and reading rows, not editing one, so the summary line
-(`3 filters · sorted by Created ↓`) is usually all you need. The operators offered for a column
+or **any**, plus **Default sort** rows — the order the query opens in, and what
+the grid goes back to. The operators offered for a column
 are narrowed by its `dataType` — a text column gets `contains`/`startsWith`, a
 number or timestamp gets the comparisons, and an unrecognised type gets all
 sixteen rather than hiding the one you needed. `is any of` / `is none of` take a
@@ -90,15 +100,51 @@ comma-separated list and are sent as a JSON array. `is blank` / `is not blank`
 take no value at all. Rows with no field chosen are ignored, so a half-filled
 row never blocks a run.
 
+**Columns.** The chooser under the sort rows — **▸ All 12 columns** — opens a
+popover with **Select all**, **Deselect all**, and a checkbox per column (the
+table's own fields plus `id` and Tulip's `_createdAt` / `_updatedAt` /
+`_sequenceNumber`). The grid narrows as you tick, and **Export CSV** carries
+exactly the ticked columns, in the table's own order, whether or not a page
+happens to have values for them. The selection is saved with the query as
+`columns: string[]`; every column ticked normalises to `columns: null`, so a
+query saved with everything shown keeps showing fields added to the table later.
+It is client-side only — the records call has no projection parameter, so every
+field still comes down the wire. Switching the query to a different table drops
+the selection; deselecting everything leaves the grid empty with a note rather
+than quietly showing all.
+
+**Archived tables and columns never appear** — not in the picker (the recents
+included), the filter fields, the sort fields, the column chooser, the grid, or
+the CSV. Tulip archives by soft delete (`deletedAt` on a table, `hidden` on a
+column), and `isArchived()` in `data-queries.js` also accepts `deleted`,
+`archived`, `isArchived`, `archivedAt` and `status: "archived"` since the
+endpoints are private and the shape is second-hand. The grid rule matters
+because records still carry values for archived fields: the metadata says the
+column is gone, and the metadata wins. `docs/probes/archived-flags-probe.js`
+prints which flags a tenant actually sends.
+
+**Sorting the grid.** Click a column header to sort by it, ascending; click it
+again to flip. Every header sorts, including `id` and Tulip's own fields. This
+is not the browser reordering a page: the request goes back out with the same
+filters and search terms and the clicked column as `sortOptions`, from page
+one, so it is the whole answer sorted — and **‹ Prev / Next ›** and **Export
+CSV** follow it. It is a _view_ sort, not part of the query: nothing is saved,
+the builder's **Default sort** is untouched, and a note above the grid
+(`Sorted by Qty ↑ · back to the default sort`) is the way back. Opening a
+different query, switching the table, or editing the default sort all drop it.
+The arrow on a header shows whichever sort is in force — the default sort's
+first row when nothing has been clicked.
+
 **There is no Run button — the query runs itself.** Picking a table, changing a
 filter's field or operator, adding or removing a filter or sort, switching
-all/any, opening a saved query, or coming back to the tab all fetch the answer;
+all/any, clicking a column header, opening a saved query, or coming back to the
+tab all fetch the answer;
 typing into a filter value fetches ~450ms after you stop. Runs supersede rather
 than queue, so only the last one's answer reaches the grid, and the caret stays
 where it was when a re-render lands under it. A row that doesn't compile yet
 (`"is" needs a value.`) doesn't run at all: the reason shows as a grey note
-beside **Export CSV** and the last good answer stays on screen until the row is
-finished.
+in the builder's action row and the last good answer stays on screen until the
+row is finished.
 
 **The page size is fixed at 100** and is not adjustable. There was a Limit box;
 it was a foot-gun — a small limit silently truncates the answer, and nothing is
@@ -176,10 +222,10 @@ GET /api/v3/w/<wsId>/tables                    (the picker's list, unpaged — i
 ```
 
 **Search inputs.** A filter value containing `[Name]` becomes a runtime input:
-each distinct name renders a labelled box above the grid — outside the collapsed
-"Filters & sort" disclosure, since the point is that the builder stays folded and
-the search boxes are what you see. Typing debounces at 450ms and re-runs, the
-same path a filter-value edit takes; Enter skips the wait.
+each distinct name renders a labelled box above the grid — in the use panel,
+where they are the only controls, and under the builder while editing so a
+placeholder can be tried as it is typed. Typing debounces at 450ms and re-runs,
+the same path a filter-value edit takes; Enter skips the wait.
 
 **A blank box drops its filter** rather than matching on an empty string, so an
 untouched query returns the whole table and each box narrows it as it is filled.

@@ -34,6 +34,18 @@
     return Number.isFinite(n) && n > PAGE_LIMIT ? Math.floor(n) : PAGE_LIMIT;
   }
 
+  // Which columns a query shows and exports. `null` is every column — the
+  // default, and what every query saved before this field existed reads back
+  // as. A list is honoured as given, an empty list included ("none"); order is
+  // not significant, the UI shows them in the table's own order. Purely a
+  // presentation choice: the records call has no projection parameter, so this
+  // never reaches the URL — a saved query is still a valid getRecords() params
+  // object with one extra key the library ignores.
+  function normalizeColumns(value) {
+    if (!Array.isArray(value)) return null;
+    return [...new Set(value.filter((v) => typeof v === "string" && v))];
+  }
+
   // ── Filter vocabulary ───────────────────────────────────────────────────────
 
   // `arity`: 0 = no argument, 1 = one value, "list" = comma-separated -> string[]
@@ -150,6 +162,7 @@
       filterAggregator: "all",
       sortOptions: [{ sortBy: "_createdAt", sortDir: "desc" }],
       limit: PAGE_LIMIT,
+      columns: null, // see normalizeColumns
     };
   }
 
@@ -267,9 +280,14 @@
       tableId: query.tableId,
       filters,
       filterAggregator: query.filterAggregator || "all",
-      sortOptions: query.sortOptions || [],
+      // Copies, not the builder's own arrays: the saved record must not move
+      // when the query is edited afterwards, or an unsaved edit would reach the
+      // store through the next persist() and Cancel would have nothing to go
+      // back to.
+      sortOptions: (query.sortOptions || []).map((s) => ({ ...s })),
       limit: normalizeLimit(query.limit),
-      rows: query.rows || [],
+      columns: normalizeColumns(query.columns),
+      rows: (query.rows || []).map((r) => ({ ...r })),
       createdAt: query.createdAt || now,
       updatedAt: now,
     };
@@ -286,6 +304,7 @@
       filterAggregator: saved.filterAggregator || "all",
       sortOptions: Array.isArray(saved.sortOptions) ? saved.sortOptions.map((s) => ({ ...s })) : [],
       limit: normalizeLimit(saved.limit),
+      columns: normalizeColumns(saved.columns),
       createdAt: saved.createdAt,
     };
   }
@@ -322,6 +341,7 @@
           filterAggregator: saved.filterAggregator || "all",
           sortOptions: saved.sortOptions || [],
           limit: normalizeLimit(saved.limit),
+          columns: normalizeColumns(saved.columns),
           rows: saved.rows || [],
         },
       ],
@@ -382,6 +402,7 @@
               .map((o) => ({ sortBy: o.sortBy, sortDir: o.sortDir === "asc" ? "asc" : "desc" }))
           : [],
         limit: normalizeLimit(raw.limit),
+        columns: normalizeColumns(raw.columns),
         // Builder rows are a UI convenience; rebuild them when absent so an
         // imported query is still editable rather than read-only.
         rows: Array.isArray(raw.rows) ? raw.rows.map((r) => ({ ...r })) : rowsFromFilters(filters),
@@ -476,6 +497,7 @@
     resolveValue,
     queryToParams,
     emptyQuery,
+    normalizeColumns,
     toSaved,
     fromSaved,
     rowsFromFilters,
