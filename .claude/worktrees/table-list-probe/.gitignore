@@ -1,0 +1,19 @@
+# Local Claude Code settings (machine-specific permission allowlists)
+.claude/settings.local.json
+
+# Local notes / scratch (may contain tenant URLs, tokens, or repro steps)
+local/
+*.local.md
+scratch.*
+
+# Dependencies (none are committed; only used for ad-hoc tooling via npx)
+node_modules/
+
+# OS / editor cruft
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
+.vscode/
+
+*CLAUDE.md

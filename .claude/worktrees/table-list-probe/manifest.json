@@ -1,0 +1,86 @@
+{
+  "manifest_version": 3,
+  "name": "Tulbelt Unlisted",
+  "version": "1.0.6",
+  "description": "Quality-of-life toggles for tulip.co.",
+  "permissions": ["declarativeNetRequestWithHostAccess", "storage", "webNavigation"],
+  "host_permissions": ["*://*.tulip.co/*"],
+  "background": {
+    "service_worker": "background.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": ["*://*.tulip.co/*"],
+      "js": [
+        "toggles/lib.js",
+        "toggles/devtools.js",
+        "toggles/reorder-row-buttons.js",
+        "toggles/auto-snapshot.js",
+        "toggles/hide-legacy.js",
+        "toggles/disable-tooltips.js",
+        "toggles/hide-view-only-triggers.js",
+        "toggles/move-variables-to-toolbar.js",
+        "toggles/hide-app-editor-chrome.js",
+        "toggles/compact-app-editor-header.js",
+        "toggles/dark-mode.js",
+        "toggles/strip-tab-title-prefix.js",
+        "toggles/filters-builder.js",
+        "toggles/variable-full-path.js",
+        "toggles/expand-all-variable-paths.js",
+        "toggles/expression-editor-fuzzy.js",
+        "toggles/collapse-tables-tile.js",
+        "toggles/action-editor-frequent.js",
+        "toggles/query-list-search.js",
+        "toggles/history-search.js",
+        "toggles/submitted-pending-approvals.js",
+        "toggles/app-list-date-columns.js",
+        "toggles/option-sets-builder.js",
+        "toggles/option-sets-trigger.js",
+        "toggles/trigger-value-full-text.js",
+        "toggles/flatten-top-menu.js",
+        "toggles/paste-trigger-anywhere.js",
+        "toggles/dev-probe.js"
+      ],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["*://*.tulip.co/*"],
+      "js": ["toggles/context-menu-copy-cut.js", "toggles/snap-to-grid.js"],
+      "run_at": "document_idle",
+      "all_frames": true
+    },
+    {
+      "matches": ["*://*.tulip.co/*"],
+      "js": ["toggles/expression-editor-fuzzy-main.js", "toggles/filters-builder-main.js"],
+      "run_at": "document_idle",
+      "world": "MAIN"
+    },
+    {
+      "matches": ["*://*.tulip.co/*"],
+      "js": [
+        "toggles/app-list-date-columns-main.js",
+        "toggles/submitted-pending-approvals-main.js",
+        "toggles/paste-trigger-anywhere-main.js"
+      ],
+      "run_at": "document_start",
+      "world": "MAIN"
+    }
+  ],
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Tulbelt",
+    "default_icon": {
+      "16": "icons/icon16.png",
+      "32": "icons/icon32.png",
+      "48": "icons/icon48.png",
+      "128": "icons/icon128.png"
+    }
+  },
+  "icons": {
+    "16": "icons/icon16.png",
+    "32": "icons/icon32.png",
+    "48": "icons/icon48.png",
+    "128": "icons/icon128.png"
+  }
+}

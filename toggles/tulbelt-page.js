@@ -37,6 +37,8 @@
   const MENU_LI_ATTR = "data-tulbelt-page-menu-item";
   const STYLE_ID = "tulbelt-page-styles";
   const PANEL_ID = "tulbelt-page-panel";
+  // What the browser tab reads while the panel is up.
+  const PAGE_TITLE = "Tulbelt";
   // How long after a cold load we keep reclaiming the URL from Tulip's router.
   const COLD_LOAD_GUARD_MS = 5000;
 
@@ -56,6 +58,42 @@
   // Whether we pushed a history entry for the fake URL — decides whether Back
   // can pop one or has to navigate somewhere real.
   let pushedEntry = false;
+  // The document title from before we took it over, and the observer holding it.
+  let savedTitle = null;
+  let titleObserver = null;
+
+  // Brand: the wrench the extension ships as its toolbar icon (lucide wrench),
+  // plus the navy it's drawn on, so the page and the popup read as one thing.
+  const ACCENT = "#144a9e";
+  const WRENCH_PATH =
+    "M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.106-3.105c.32-.322.863-.22.983.218a6 6 0 0 1-8.259 7.057l-7.91 7.91a1 1 0 0 1-2.999-3l7.91-7.91a6 6 0 0 1 7.057-8.259c.438.12.54.662.219.984z";
+
+  function svgEl(className, innerHTML) {
+    const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+    svg.setAttribute("class", className);
+    svg.setAttribute("viewBox", "0 0 24 24");
+    svg.setAttribute("aria-hidden", "true");
+    svg.innerHTML = innerHTML;
+    return svg;
+  }
+
+  // Line-art wrench that inherits `color` — sits beside a label, menu-icon style.
+  const wrenchIcon = (className) =>
+    svgEl(
+      className,
+      `<path d="${WRENCH_PATH}" fill="none" stroke="currentColor" stroke-width="2" ` +
+        `stroke-linecap="round" stroke-linejoin="round"/>`,
+    );
+
+  // The toolbar icon in miniature: white wrench on a filled navy disc.
+  const brandMark = (className) =>
+    svgEl(
+      className,
+      `<circle cx="12" cy="12" r="12" fill="${ACCENT}"/>` +
+        `<g transform="translate(12 12) scale(0.62) translate(-12 -12)" fill="none" stroke="#fff" ` +
+        `stroke-width="3" stroke-linecap="round" stroke-linejoin="round">` +
+        `<path d="${WRENCH_PATH}"/></g>`,
+    );
 
   const normalizePath = (p) => p.replace(/\/+$/, "") || "/";
   const isFakePath = (p = location.pathname) => {
@@ -119,22 +157,71 @@
   // ── Styles ──────────────────────────────────────────────────────────────────
 
   const CSS = `
+      /* The dropdown item: the brand wrench in front of the label, so the row
+         reads as ours among Tulip's own. Laying the anchor out as a flex row
+         keeps it full-width — the hover fill still spans the whole row —
+         and !important because Tulip's own rule for these anchors is more
+         specific than any selector we can write against the cloned markup. */
+      li[${MENU_LI_ATTR}] a {
+        display: flex !important; align-items: center !important; gap: 10px !important;
+      }
+      li[${MENU_LI_ATTR}] .tbp-menu-icon { flex: 0 0 auto; width: 16px; height: 16px; color: ${ACCENT}; }
+
       #${PANEL_ID} {
         position: fixed; inset: 0; z-index: 2147483000; display: flex; flex-direction: column;
         background: #fff; color: #1a1f28;
         font: 14px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+        border-top: 3px solid ${ACCENT};
       }
-      #${PANEL_ID} .tbp-panel-bar { flex: 0 0 auto; display: flex; align-items: center; gap: 12px; padding: 10px 16px; background: #f6f8fb; }
-      #${PANEL_ID} .tbp-panel-title { font-size: 1.15em; font-weight: 600; }
+      #${PANEL_ID} .tbp-panel-bar { flex: 0 0 auto; display: flex; align-items: center; gap: 12px; padding: 10px 16px; background: linear-gradient(180deg, #f9fbfd, #eef2f8); }
+      #${PANEL_ID} .tbp-panel-lockup { display: flex; align-items: center; gap: 8px; }
+      #${PANEL_ID} .tbp-panel-mark { flex: 0 0 auto; width: 22px; height: 22px; }
+      #${PANEL_ID} .tbp-panel-title { font-size: 1.15em; font-weight: 700; letter-spacing: 0.01em; color: #14315e; }
       #${PANEL_ID} .tbp-panel-brand { margin-left: auto; color: #788293; font-size: 0.85em; }
       #${PANEL_ID} .tbp-panel-back { font: inherit; padding: 6px 12px; border: 1px solid #d5dae2; border-radius: 4px; background: #fff; color: inherit; cursor: pointer; }
-      #${PANEL_ID} .tbp-panel-back:hover { border-color: #1c69e1; }
-      #${PANEL_ID} .tbp-tabs { flex: 0 0 auto; display: flex; gap: 4px; padding: 0 16px; background: #f6f8fb; border-bottom: 1px solid #d5dae2; }
+      #${PANEL_ID} .tbp-panel-back:hover { border-color: ${ACCENT}; color: ${ACCENT}; }
+      #${PANEL_ID} .tbp-tabs { flex: 0 0 auto; display: flex; gap: 4px; padding: 0 16px; background: #eef2f8; border-bottom: 1px solid #d5dae2; }
       #${PANEL_ID} .tbp-tab { font: inherit; padding: 8px 14px; border: none; border-bottom: 2px solid transparent; background: none; color: #45526b; cursor: pointer; }
-      #${PANEL_ID} .tbp-tab:hover { color: #1c69e1; }
-      #${PANEL_ID} .tbp-tab-on { color: #1c69e1; border-bottom-color: #1c69e1; font-weight: 600; }
-      #${PANEL_ID} .tbp-content { flex: 1 1 auto; min-width: 0; overflow: auto; }
+      #${PANEL_ID} .tbp-tab:hover { color: ${ACCENT}; }
+      #${PANEL_ID} .tbp-tab-on { color: ${ACCENT}; border-bottom-color: ${ACCENT}; font-weight: 600; }
+      /* The panel covers the app entirely, so its scroll has nowhere sensible to
+         chain to: a swipe that runs off the end of a tab's content must not
+         scroll — or history-navigate — the Tulip page underneath it. */
+      #${PANEL_ID} .tbp-content { flex: 1 1 auto; min-width: 0; overflow: auto; overscroll-behavior: none; }
     `;
+
+  // ── Title ───────────────────────────────────────────────────────────────────
+
+  // /tulbelt/<tab> is a route Tulip's router doesn't know, so whatever it
+  // renders underneath us titles the document "Not Found" — and that title is
+  // what the browser tab shows, since our panel is the only thing visible.
+  // Hold the title for as long as the panel is up, then give back what was
+  // there.
+  function applyTitle() {
+    if (document.title !== PAGE_TITLE) document.title = PAGE_TITLE;
+  }
+
+  function claimTitle() {
+    if (titleObserver) return;
+    savedTitle = document.title;
+    applyTitle();
+    // The app rewrites (and sometimes replaces) the <title> element on its own
+    // schedule, and it lives in <head> — which the panel observer doesn't watch
+    // — so reassert on any head mutation. applyTitle writes only when the title
+    // actually differs, so our own write doesn't feed the loop.
+    titleObserver = new MutationObserver(applyTitle);
+    titleObserver.observe(document.head, { childList: true, subtree: true, characterData: true });
+  }
+
+  function releaseTitle() {
+    if (!titleObserver) return;
+    titleObserver.disconnect();
+    titleObserver = null;
+    // Put the old title back only if ours is still the one showing; the app
+    // retitles on its own once it renders a route it knows.
+    if (document.title === PAGE_TITLE && savedTitle != null) document.title = savedTitle;
+    savedTitle = null;
+  }
 
   // ── Nav item ────────────────────────────────────────────────────────────────
 
@@ -166,6 +253,8 @@
     a.setAttribute("data-testid", "tulbelt");
     const label = a.querySelector("span") || a;
     label.textContent = "Tulbelt";
+    // Before the label, never inside it — `label` may be the anchor itself.
+    a.prepend(wrenchIcon("tbp-menu-icon"));
     a.addEventListener("click", onMenuLinkClick);
     // Above Sign out — the only row that is a button rather than a link.
     const signOut = items.find((n) => !n.querySelector("a[href]"));
@@ -189,9 +278,12 @@
     back.title = "Leave Tulbelt and return to Tulip";
     back.addEventListener("click", goBack);
     bar.appendChild(back);
-    bar.appendChild(el("span", "tbp-panel-title", "Tulbelt"));
+    const lockup = el("div", "tbp-panel-lockup");
+    lockup.appendChild(brandMark("tbp-panel-mark"));
+    lockup.appendChild(el("span", "tbp-panel-title", "Tulbelt"));
+    bar.appendChild(lockup);
     bar.appendChild(
-      el("span", "tbp-panel-brand", "Browser extension — nothing here leaves this browser")
+      el("span", "tbp-panel-brand", "Browser extension — nothing here leaves this browser"),
     );
     panel.appendChild(bar);
 
@@ -281,6 +373,7 @@
     activeTabId = pageForPath().id;
     active = true;
     ensureStyles(STYLE_ID, CSS);
+    claimTitle();
     syncPanel();
   }
 
@@ -288,6 +381,7 @@
     if (!active) return;
     closeContainer();
     active = false;
+    releaseTitle();
     document.getElementById(PANEL_ID)?.remove();
     pushedEntry = false;
     if (restoreUrl && isFakePath()) history.replaceState(null, "", lastRealPath);

@@ -77,7 +77,7 @@ see [the shared page shell](#the-tulbelt-page-shell) below). Paste a table id �
 `Sb28KTCAWbt6PLm5f` — or a whole table URL and hit **Load table** to fetch its
 columns, then build a query against them and save it under a name.
 
-**The builder.** Filter rows are *field · operator · value*, matched on **all**
+**The builder.** Filter rows are _field · operator · value_, matched on **all**
 or **any**, plus sort rows. The query's name sits at the top of the builder, and
 the filter and sort rows are folded behind a **Filters & sort** disclosure that
 starts collapsed on every query you open — the common errand here is grabbing a
@@ -90,13 +90,27 @@ comma-separated list and are sent as a JSON array. `is blank` / `is not blank`
 take no value at all. Rows with no field chosen are ignored, so a half-filled
 row never blocks a run.
 
+**There is no Run button — the query runs itself.** Picking a table, changing a
+filter's field or operator, adding or removing a filter or sort, switching
+all/any, opening a saved query, or coming back to the tab all fetch the answer;
+typing into a filter value fetches ~450ms after you stop. Runs supersede rather
+than queue, so only the last one's answer reaches the grid, and the caret stays
+where it was when a re-render lands under it. A row that doesn't compile yet
+(`"is" needs a value.`) doesn't run at all: the reason shows as a grey note
+beside **Export CSV** and the last good answer stays on screen until the row is
+finished.
+
 **The page size is fixed at 100** and is not adjustable. There was a Limit box;
 it was a foot-gun — a small limit silently truncates the answer, and nothing is
-bought by asking for less. **Run** always shows the first 100 matches; when it
-fills the page it says so and points at the export. A query hand-written with a
-larger `limit` still gets what it asked for: 100 is a floor, not a ceiling.
+bought by asking for less. A query hand-written with a larger `limit` still gets
+what it asked for: 100 is a floor, not a ceiling. **‹ Prev / Next ›** above the
+grid walk `offset` a page at a time (`Records 101–200`, `Page 2`); the grid stays
+on screen while the next page is fetched rather than blinking out. There is no
+page count to show — a records call returns a page and no total — so **Next** is
+offered whenever the current page came back full, and any change to the query
+sends you back to page 1.
 
-**Export CSV** is how you get the whole answer out. It re-runs the *same* query
+**Export CSV** is how you get the whole answer out. It re-runs the _same_ query
 you built and walks it page by page — `offset` 0, 100, 200, … — until a page
 comes back empty, then downloads the union of every page as a CSV. Columns are
 the union across all rows fetched (records omit fields they have no value for),
@@ -105,7 +119,17 @@ with a UTF-8 BOM so Excel opens it without mangling. Progress shows the running
 count and a **Cancel** that takes effect between pages. A cap of 1000 pages
 (100k records) stops a runaway; hitting it says so rather than pretending the
 file is complete. Every page is a separate request on the session's own
-credentials, exactly like Run.
+credentials, exactly like the grid's own.
+
+**The grid** orders columns the way the table itself does — the field sequence
+the metadata call hands back, so the columns read as they do on Tulip's own
+table page — with `id` first, any field the metadata didn't mention after the
+ones it did, and Tulip's own record fields (`Seq`, `Created`, `Updated`) last.
+It scrolls inside itself, header row pinned, and `overscroll-behavior: none`
+keeps the scroll to the grid: no rubber-band past its own edge, and no swipe
+that runs off the end of it scrolling — or history-navigating — what's behind.
+The page shell's `.tbp-content` carries the same rule for the same reason: the
+panel covers the app, so its scroll has nowhere sensible to chain to.
 
 **Saved queries** are listed down the left: click one to load and run it, `⧉` to
 copy it as JSON for sharing, `×` to delete (with a confirm step). Saving
@@ -148,7 +172,48 @@ is the UI over it and owns no query semantics.
 ```
 GET /api/v3/w/<wsId>/tables/<tableId>/records?filters=…&filterAggregator=…&sortOptions=…&limit=…&offset=0
 GET /api/v3/w/<wsId>/tables/<tableId>          (columns + labels; failure is non-fatal)
+GET /api/v3/w/<wsId>/tables                    (the picker's list, unpaged — it takes no query string; failure is non-fatal)
 ```
+
+**Search inputs.** A filter value containing `[Name]` becomes a runtime input:
+each distinct name renders a labelled box above the grid — outside the collapsed
+"Filters & sort" disclosure, since the point is that the builder stays folded and
+the search boxes are what you see. Typing debounces at 450ms and re-runs, the
+same path a filter-value edit takes; Enter skips the wait.
+
+**A blank box drops its filter** rather than matching on an empty string, so an
+untouched query returns the whole table and each box narrows it as it is filled.
+That rule lives in `resolveValue()` in the model, which returns `null` for a
+value whose placeholders are still empty; `compileFilters()` skips those rows the
+same way it skips a row with no field. A value with no brackets parses to zero
+inputs and compiles byte-identically to before, so existing saved queries are
+untouched.
+
+Placeholders can be embedded (`ACME-[Suffix]`) and one name can feed several
+filters. Operators taking no value (`is blank`) can't hold one. There is
+deliberately no escape for a literal bracket — a table value containing brackets
+that someone also wants to search on is rare enough to leave the rule
+unqualified.
+
+What gets typed lives on `state` for the life of the tab and is never persisted:
+a saved query stores the *template*, so opening it gives the boxes back empty,
+and opening a different query clears them. One consequence worth knowing:
+`toSaved` stores the compiled `filters` array as well as the templates in `rows`,
+because a saved query is guaranteed to be a valid `getRecords()` params object.
+A template has no valid compiled form, so `filters` is compiled against whatever
+was typed at save time with blanks dropped, while `rows` keeps the templates.
+
+**Picking a table.** The field is a combobox: type to filter the workspace's
+tables by name or id, arrow keys and Enter to choose. Tables you opened recently
+head the list, read straight from `history-search.js`'s
+`chrome.storage.local["tulbelt:history"]` — the two toggles share an isolated
+world, so this costs no request and works even when the list call doesn't. Both
+sources are optional. The input still holds the table _id_ and still accepts a
+pasted id or table URL, exactly as it did before the picker, so a `/tables`
+refused to the session's borrowed credential degrades to recents-plus-paste with
+a note in the dropdown's footer rather than an error. `docs/probes/table-list-probe.js`
+diagnoses such a refusal; `docs/data-queries-table-picker.md` covers the
+endpoint and the fallbacks.
 
 **Auth.** No API key field, and nothing is stored. `toggles/tulbelt-session-main.js`
 runs in the MAIN world at `document_start` and patches `fetch`/`XHR` to capture
@@ -251,7 +316,7 @@ library the production header uses.) Where that's the case the watcher carries
 it, at a cost of one hover per menu, once, before the answer is cached.
 
 Order matters here and was got wrong once: the watcher used to be armed only
-*after* the probe gave up, so a hover made on a fresh page — the most likely
+_after_ the probe gave up, so a hover made on a fresh page — the most likely
 moment for one — landed in the gap and was missed, which is what made this feel
 like it needed several tries. When the probe comes up empty, click-through
 routing is switched off at the same time, since it re-opens menus the same way
@@ -264,7 +329,7 @@ saw fewer, and reads settle for 250ms first, so a menu part-way through
 rendering never becomes the cached answer.
 
 Flattening is all-or-nothing: a menu that reads as empty never opened, so unless
-*every* dropdown is known the header is left exactly as Tulip drew it and nothing
+_every_ dropdown is known the header is left exactly as Tulip drew it and nothing
 is cached. Flattening the readable menus around an unread one produces a
 half-done nav that reads as a bug — worse than not flattening at all. Set the
 developer-only `dev-tools` toggle to record what was read; entries are tagged
@@ -277,7 +342,7 @@ bar are dropped too.
 
 Status flags ("New", "Upgrade", "Beta", …) are stripped from the text a
 flattened link shows. Each harvested row carries two readings: `label` is plain
-`textContent`, and every decision about *whether* a link is flattened runs on it
+`textContent`, and every decision about _whether_ a link is flattened runs on it
 alone — dedupe, parent/child matching, and the "did this menu read?" test.
 `caption` is the stripped version and is only ever the text painted on screen.
 Keeping them apart is deliberate: stripping is cosmetic, and the one time it was
@@ -513,11 +578,11 @@ until the user edits a builder field.
 
 `toggles/tulbelt-page.js` owns one full-window page reached from the account
 dropdown (the menu with My profile / Sign out) — the only entry point on
-purpose, since the account *settings* pages aren't available to every user, so
+purpose, since the account _settings_ pages aren't available to every user, so
 nothing hangs off the settings sidebar. The item is anchored on
 `li[data-testid="my-profile-menuitem"]` and placed above Sign out. The clone
 carries no React fiber, so Tulip's delegated handlers never fire for it, and
-the click dispatches a synthetic Escape *from the link* (React delegates from
+the click dispatches a synthetic Escape _from the link_ (React delegates from
 its root container, so an event fired on `document` would never reach the
 popup) to dismiss the menu.
 
@@ -550,7 +615,7 @@ window.__tulbeltPage.register({
 window.__tulbeltPage.unregister("data-queries");
 ```
 
-Registration *is* the enable signal, so the account-menu item appears when the
+Registration _is_ the enable signal, so the account-menu item appears when the
 first page registers and disappears when the last one unregisters. The tab strip
 hides itself when only one page is registered — a lone tab is a label, not a
 choice, and the Back bar already says Tulbelt. Turning off the toggle for the tab

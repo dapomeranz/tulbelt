@@ -23,7 +23,13 @@
   let data = null;
   let storageError = "";
   // UI state survives navigating away and back within the tab.
-  const ui = { selectedId: null, creating: false, importing: false, confirmDelete: false, focus: null };
+  const ui = {
+    selectedId: null,
+    creating: false,
+    importing: false,
+    confirmDelete: false,
+    focus: null,
+  };
 
   function newId(prefix) {
     return `${prefix}_${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
@@ -209,7 +215,7 @@
         (err) => {
           storageError = `Couldn't copy to clipboard: ${err.message}`;
           renderBanner();
-        }
+        },
       );
     });
     tools.appendChild(exportBtn);
@@ -240,7 +246,9 @@
       row.appendChild(name);
       const meta = el("span", "osb-set-meta");
       meta.appendChild(el("span", "osb-badge", typeLabel(set.dataType)));
-      meta.appendChild(el("span", "", `${set.options.length} option${set.options.length === 1 ? "" : "s"}`));
+      meta.appendChild(
+        el("span", "", `${set.options.length} option${set.options.length === 1 ? "" : "s"}`),
+      );
       row.appendChild(meta);
       row.addEventListener("click", () => {
         ui.selectedId = set.id;
@@ -271,8 +279,8 @@
             "osb-hint",
             data.sets.length
               ? "Select an option set on the left, or create a new one."
-              : "Create your first option set to get started. Option sets are stored in this browser for this Tulip instance only."
-          )
+              : "Create your first option set to get started. Option sets are stored in this browser for this Tulip instance only.",
+          ),
         );
       }
     }
@@ -347,8 +355,8 @@
       el(
         "p",
         "osb-hint",
-        "Paste an export from another Tulbelt user. Imported sets are added alongside your existing ones."
-      )
+        "Paste an export from another Tulbelt user. Imported sets are added alongside your existing ones.",
+      ),
     );
     const error = el("div", "osb-import-error");
     error.style.display = "none";
@@ -393,7 +401,10 @@
 
     // Header: name, type badge, delete with inline confirm.
     const header = el("div", "osb-editor-header");
-    const nameInput = el("input", "osb-input osb-editor-name" + (set.name.trim() ? "" : " osb-invalid"));
+    const nameInput = el(
+      "input",
+      "osb-input osb-editor-name" + (set.name.trim() ? "" : " osb-invalid"),
+    );
     nameInput.type = "text";
     nameInput.value = set.name;
     nameInput.placeholder = "Option set name";
@@ -498,7 +509,7 @@
 
     const value = el(
       "input",
-      "osb-input osb-opt-value" + (valueInvalid(set.dataType, option.value) ? " osb-invalid" : "")
+      "osb-input osb-opt-value" + (valueInvalid(set.dataType, option.value) ? " osb-invalid" : ""),
     );
     value.dataset.optValue = option.id;
     if (set.dataType === "integer") {
@@ -596,8 +607,8 @@
       el(
         "div",
         "osb-disclaimer",
-        "This is a local-only menu provided by the Tulbelt plugin. Option sets are stored in your browser and written to Tulip as regular static values when used. They will not be shared with any other users, as Tulbelt does not have access to any data storage other than your browser."
-      )
+        "This is a local-only menu provided by the Tulbelt plugin. Option sets are stored in your browser and written to Tulip as regular static values when used. They will not be shared with any other users, as Tulbelt does not have access to any data storage other than your browser.",
+      ),
     );
     container.appendChild(el("div", "osb-root"));
     // Reload from localStorage on every activation so edits from another tab

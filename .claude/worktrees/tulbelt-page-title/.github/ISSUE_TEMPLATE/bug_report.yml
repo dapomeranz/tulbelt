@@ -1,0 +1,93 @@
+name: Bug report
+description: A toggle isn't working or breaks the Tulip UI
+title: "[bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: >
+        Toggles work by tweaking Tulip's web UI, which changes between Tulip
+        releases. The **Tulip version** field below is required — most bugs are
+        specific to a particular Tulip version, and reports without it usually
+        can't be acted on.
+
+  - type: input
+    id: toggle
+    attributes:
+      label: Which toggle?
+      description: The feature name from the popup, or "extension itself".
+    validations:
+      required: true
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What you saw vs. what you expected.
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      value: |
+        1.
+        2.
+        3.
+    validations:
+      required: true
+
+  - type: dropdown
+    id: reverts
+    attributes:
+      label: Does toggling it OFF fully restore the page?
+      options:
+        - "Yes"
+        - "No"
+        - "Not sure"
+    validations:
+      required: true
+
+  - type: input
+    id: tulip-version
+    attributes:
+      label: Tulip version
+      description: >
+        The Tulip platform version your instance is running (for example a
+        release like `r290` or an LTS label). It's usually shown in the Tulip
+        site's account/help menu or footer. Omit anything private.
+    validations:
+      required: true
+
+  - type: input
+    id: browser
+    attributes:
+      label: Browser & version
+      description: e.g. Chrome 134, Edge 133.
+    validations:
+      required: true
+
+  - type: input
+    id: tulbelt-version
+    attributes:
+      label: Tulbelt version
+      description: See `manifest.json` or the browser's extensions page.
+    validations:
+      required: true
+
+  - type: input
+    id: tulip-url
+    attributes:
+      label: Tulip page / URL pattern
+      description: The kind of page it happens on. Omit anything private.
+    validations:
+      required: false
+
+  - type: textarea
+    id: console
+    attributes:
+      label: Console errors
+      description: DevTools console + the extension's service worker logs, if any.
+    validations:
+      required: false

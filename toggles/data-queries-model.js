@@ -54,7 +54,12 @@
     { id: "isIn", label: "is any of", arity: "list", families: ["text", "number"] },
     { id: "notIsIn", label: "is none of", arity: "list", families: ["text", "number"] },
     { id: "blank", label: "is blank", arity: 0, families: ["text", "number", "time", "bool"] },
-    { id: "notBlank", label: "is not blank", arity: 0, families: ["text", "number", "time", "bool"] },
+    {
+      id: "notBlank",
+      label: "is not blank",
+      arity: 0,
+      families: ["text", "number", "time", "bool"],
+    },
   ];
 
   const OPERATOR_BY_ID = new Map(OPERATORS.map((o) => [o.id, o]));
@@ -148,16 +153,68 @@
     };
   }
 
+  // ── Runtime inputs ──────────────────────────────────────────────────────────
+
+  // A filter value can carry `[Name]` placeholders, which turn the saved query
+  // from a static report into a search tool: the name labels a box above the
+  // grid, and what gets typed is substituted in before the query runs. A blank
+  // box drops that filter entirely rather than searching for an empty string —
+  // "no answer yet" means "don't narrow by this", which is what makes an
+  // all-blank query show everything.
+  //
+  // Any bracketed run of text counts, so a value can be a bare placeholder
+  // (`[Customer]`) or embed one (`ACME-[Suffix]`). There is deliberately no
+  // escape for a literal bracket; see docs/toggles.md.
+  const INPUT_RE = /\[([^\][]+)\]/g;
+
+  // Every distinct placeholder across the rows, in first-seen order so the
+  // search bar reads in the same order as the filters that use it. One name
+  // used by two filters is one input feeding both.
+  function parseInputs(rows) {
+    const seen = new Set();
+    const inputs = [];
+    for (const row of rows || []) {
+      const value = row?.value;
+      if (typeof value !== "string") continue;
+      for (const m of value.matchAll(INPUT_RE)) {
+        const name = m[1].trim();
+        if (!name || seen.has(name)) continue;
+        seen.add(name);
+        inputs.push({ name });
+      }
+    }
+    return inputs;
+  }
+
+  // Substitutes what has been typed. Returns null when any placeholder in this
+  // value has nothing behind it — the caller's signal to drop the filter, not
+  // an error. A value with no placeholders passes through untouched, which is
+  // why every query saved before this feature compiles exactly as it did.
+  function resolveValue(template, inputs = {}) {
+    if (typeof template !== "string" || !template.includes("[")) return template;
+    let blank = false;
+    const out = template.replace(INPUT_RE, (whole, rawName) => {
+      const typed = inputs[rawName.trim()];
+      const text = typed == null ? "" : String(typed);
+      if (text.trim() === "") blank = true;
+      return text;
+    });
+    return blank ? null : out;
+  }
+
   // Builder rows carry the raw input; filters are compiled from them. Rows with
-  // no field are ignored so a half-filled row never blocks a run.
-  function compileFilters(rows, columnTypes = {}) {
+  // no field are ignored so a half-filled row never blocks a run, and so is a
+  // row whose placeholders are still empty.
+  function compileFilters(rows, columnTypes = {}, inputs = {}) {
     const filters = [];
     for (const row of rows) {
       if (!row.field) continue;
+      const value = resolveValue(row.value, inputs);
+      if (value === null) continue; // an input this filter needs is still blank
       const { filter, error } = buildFilter({
         field: row.field,
         functionType: row.functionType,
-        value: row.value,
+        value,
         dataType: columnTypes[row.field],
       });
       if (error) return { error };
@@ -169,7 +226,7 @@
   // Mirrors buildQueryString() + getRecords()'s "omit when empty" rules, so the
   // URL matches what the library would have produced for the same params.
   function queryToParams(query, { offset = 0 } = {}) {
-    const { filters, error } = compileFilters(query.rows, query.columnTypes || {});
+    const { filters, error } = compileFilters(query.rows, query.columnTypes || {}, query.inputs || {});
     if (error) return { error };
 
     const params = {
@@ -195,6 +252,13 @@
   // What a saved query keeps. Deliberately the getRecords() param set plus a
   // name — the builder rows come along so an edit round-trips, but `filters`
   // is what makes the record usable outside this UI.
+  //
+  // With runtime inputs those two halves say different things, on purpose.
+  // `rows` keeps the templates (`[Customer]`), so reopening the query gives you
+  // its search boxes back. `filters` is compiled against whatever was typed at
+  // save time, with blank inputs dropped — a template has no valid compiled
+  // form, and the whole point of `filters` is that it stays a runnable
+  // getRecords() params object. Typed values themselves are never stored.
   function toSaved(query, filters) {
     const now = Date.now();
     return {
@@ -216,7 +280,9 @@
       id: saved.id,
       name: saved.name || "",
       tableId: saved.tableId || "",
-      rows: Array.isArray(saved.rows) ? saved.rows.map((r) => ({ ...r })) : rowsFromFilters(saved.filters),
+      rows: Array.isArray(saved.rows)
+        ? saved.rows.map((r) => ({ ...r }))
+        : rowsFromFilters(saved.filters),
       filterAggregator: saved.filterAggregator || "all",
       sortOptions: Array.isArray(saved.sortOptions) ? saved.sortOptions.map((s) => ({ ...s })) : [],
       limit: normalizeLimit(saved.limit),
@@ -282,8 +348,8 @@
     const list = Array.isArray(parsed.queries)
       ? parsed.queries
       : parsed.query
-      ? [parsed.query]
-      : null;
+        ? [parsed.query]
+        : null;
     if (!list) return { error: "This export has no queries in it." };
 
     const now = Date.now();
@@ -406,6 +472,8 @@
     parseListArg,
     buildFilter,
     compileFilters,
+    parseInputs,
+    resolveValue,
     queryToParams,
     emptyQuery,
     toSaved,

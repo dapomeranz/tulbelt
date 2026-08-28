@@ -1,0 +1,325 @@
+/* Hairline dividers, inset hover pills in a padded list, and a single blue
+   accent. Light palette: #ffffff bg, #f7f7f7 hover, #e2e2e5 trim, #144A9E
+   accent. Dark mode keeps a dark surface with the same blue accent. */
+:root {
+  color-scheme: light dark;
+  --bg: #ffffff;
+  --fg: #212e44;
+  --muted: #707a8a;
+  --hairline: #e2e2e5;
+  --hover: #f7f7f7;
+  --accent: #144a9e;
+  --track: #e2e2e5;
+  --knob: #ffffff;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #1c2230;
+    --fg: #e8ebf1;
+    --muted: #8b94a7;
+    --hairline: rgba(255, 255, 255, 0.1);
+    --hover: rgba(255, 255, 255, 0.06);
+    --accent: #3b7cd6;
+    --track: rgba(255, 255, 255, 0.2);
+    --knob: #f4f4f5;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  width: 272px;
+  display: flex;
+  flex-direction: column;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+  background: var(--bg);
+  color: var(--fg);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Header: brand mark + identity block, GitHub links top-right */
+header {
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 12px 14px;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.header-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-width: 0;
+}
+
+.header-links {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+}
+
+.header-links a {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+  color: var(--muted);
+  text-decoration: none;
+  transition:
+    background 0.12s ease,
+    color 0.12s ease;
+}
+
+.header-links a:hover {
+  background: var(--hover);
+  color: var(--fg);
+}
+
+.header-links a:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.brand-mark {
+  flex: 0 0 26px;
+  width: 26px;
+  height: 26px;
+  border-radius: 7px;
+  display: block;
+}
+
+.brand-text {
+  min-width: 0;
+}
+
+header h1 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  line-height: 1.25;
+  letter-spacing: -0.01em;
+}
+
+header .subtitle {
+  margin: 1px 0 0;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+
+.search-bar {
+  flex-shrink: 0;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--hairline);
+}
+
+#feature-search {
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid var(--hairline);
+  border-radius: 7px;
+  font: inherit;
+  font-size: 12px;
+  color: var(--fg);
+  background: var(--bg);
+}
+
+#feature-search::placeholder {
+  color: var(--muted);
+}
+
+#feature-search:focus {
+  outline: 2px solid var(--accent);
+  outline-offset: 0;
+  border-color: transparent;
+}
+
+#feature-search::-webkit-search-cancel-button {
+  -webkit-appearance: none;
+  height: 12px;
+  width: 12px;
+  background:
+    linear-gradient(45deg, transparent 45%, var(--muted) 45%, var(--muted) 55%, transparent 55%),
+    linear-gradient(-45deg, transparent 45%, var(--muted) 45%, var(--muted) 55%, transparent 55%);
+  cursor: pointer;
+}
+
+/* Bulk actions: text links over the whole list, hidden while a search filters it */
+.bulk-actions {
+  flex-shrink: 0;
+  display: flex;
+  gap: 12px;
+  padding: 7px 14px;
+  border-bottom: 1px solid var(--hairline);
+}
+
+.bulk-actions[hidden] {
+  display: none;
+}
+
+.bulk-actions button {
+  padding: 0;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 11px;
+  font-weight: 500;
+  color: var(--accent);
+  cursor: pointer;
+}
+
+/* Sits apart from the two bulk links: it discards choices rather than setting
+   them all one way. */
+.bulk-actions .bulk-trailing {
+  margin-left: auto;
+}
+.bulk-actions button:hover {
+  text-decoration: underline;
+}
+
+.bulk-actions button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: 3px;
+}
+
+/* Toggle list: inset hover pills. No scroll pane of its own — the list renders
+   at full height and the popup sizes to it. */
+ul#toggles {
+  flex: 1;
+  min-height: 0;
+  list-style: none;
+  padding: 5px;
+  margin: 0;
+}
+
+.no-results {
+  margin: 0;
+  padding: 16px 14px 20px;
+  font-size: 12px;
+  color: var(--muted);
+  text-align: center;
+}
+
+.feature label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 7px 9px;
+  border-radius: 7px;
+  cursor: pointer;
+  transition: background 0.12s ease;
+}
+
+.feature label:hover,
+.feature label:focus-within {
+  background: var(--hover);
+}
+
+.feature-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 12.5px;
+  font-weight: 500;
+  line-height: 1.3;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Info icon + toggle, kept together at the right edge of the row */
+.feature-controls {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  flex-shrink: 0;
+}
+
+.feature-info {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 18px;
+  height: 18px;
+  color: var(--muted);
+  cursor: help;
+  transition: color 0.12s ease;
+}
+
+.feature-info:hover {
+  color: var(--accent);
+}
+
+.switch {
+  position: relative;
+  width: 26px;
+  height: 15px;
+  flex-shrink: 0;
+}
+
+.switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.slider {
+  position: absolute;
+  inset: 0;
+  background: var(--track);
+  border-radius: 999px;
+  transition: background 0.15s ease;
+}
+
+.slider::before {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 11px;
+  height: 11px;
+  background: var(--knob);
+  border-radius: 50%;
+  transition: transform 0.15s ease;
+  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.25);
+}
+
+.switch input:checked + .slider {
+  background: var(--accent);
+}
+
+.switch input:checked + .slider::before {
+  transform: translateX(11px);
+}
+
+.switch input:focus-visible + .slider {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+.tooltip {
+  position: fixed;
+  z-index: 1000;
+  max-width: 220px;
+  padding: 5px 8px;
+  font-size: 11px;
+  line-height: 1.35;
+  color: #fff;
+  background: rgba(28, 28, 30, 0.96);
+  border-radius: 4px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.28);
+  pointer-events: none;
+}

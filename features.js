@@ -156,7 +156,7 @@ export const FEATURES = [
     name: "Snap Widgets to 10px Grid",
     description:
       "In the app editor, snap a widget’s position and size to the nearest multiple of 10 when you finish dragging or resizing it. Only the values changed by that interaction are snapped; clicking a widget or manually editing the X/Y/W/H fields is left alone.",
-    defaultEnabled: true,
+    defaultEnabled: false,
   },
   {
     id: "query-list-search",
@@ -218,8 +218,8 @@ export const FEATURES = [
     id: "data-queries",
     name: "Data Queries",
     description:
-      'Adds a "Data Queries" tab to the Tulbelt page (account dropdown → Tulbelt). Paste a table id — or a table URL — to load its columns, then build a query against them: filter rows (field, operator, value) matched on all or any, and sort options — all folded behind a collapsed \'Filters & sort\' disclosure, since the usual errand is grabbing a saved query rather than editing one. Run it to see the first 100 records in a grid with real field labels, and save it under a name to re-run later. Export CSV re-runs the same query and pages through every match — offset 0, 100, 200, … until a page comes back empty — then downloads the lot as a CSV. Saved queries can be copied as JSON and pasted in elsewhere, the same way option sets are shared. Operators are narrowed by each column\'s data type, and the whole filter vocabulary mirrors the Tulip table API\'s own (equal, contains, startsWith, isIn, blank, …). The requests are the same private table API calls Tulip\'s own table page makes, issued from your browser with the session credentials the page already holds, so you see exactly what your account can already see. Saved queries live in this browser\'s local storage for this Tulip instance — nothing leaves the browser.',
-    defaultEnabled: false,
+      "Adds a \"Data Queries\" tab to the Tulbelt page (account dropdown → Tulbelt). Pick a table from the list — type to filter it by name, with the ones you opened recently on top — or paste a table id or URL, then build a query against its columns: filter rows (field, operator, value) matched on all or any, and sort options — all folded behind a collapsed 'Filters & sort' disclosure, since the usual errand is grabbing a saved query rather than editing one. Put [Name] in a filter's value to turn it into a search box above the grid: the saved query becomes a search tool rather than a static report, and a box left empty drops its filter instead of matching on nothing, so an empty search shows everything. There is no Run button — every change re-runs the query and the grid shows 100 records a page, in the table's own column order with real field labels, with Prev/Next to walk the rest. Save it under a name to open it again later. Export CSV re-runs the same query and pages through every match — offset 0, 100, 200, … until a page comes back empty — then downloads the lot as a CSV. Saved queries can be copied as JSON and pasted in elsewhere, the same way option sets are shared. Operators are narrowed by each column's data type, and the whole filter vocabulary mirrors the Tulip table API's own (equal, contains, startsWith, isIn, blank, …). The requests are the same private table API calls Tulip's own table page makes, issued from your browser with the session credentials the page already holds, so you see exactly what your account can already see. Saved queries live in this browser's local storage for this Tulip instance — nothing leaves the browser.",
+    defaultEnabled: true,
   },
   {
     id: "dev-tools",
@@ -236,9 +236,7 @@ export const FEATURES = [
 // Set `developerOnly: true` to hide a feature until developer mode (five clicks
 // on the popup title). Reload the extension after editing this file.
 export function getPopupFeatures({ showDeveloperFeatures = false } = {}) {
-  return FEATURES.filter(
-    (feature) => feature.developerOnly !== true || showDeveloperFeatures,
-  ).sort(
+  return FEATURES.filter((feature) => feature.developerOnly !== true || showDeveloperFeatures).sort(
     (a, b) =>
       Number(a.defaultEnabled === true) - Number(b.defaultEnabled === true) ||
       a.name.localeCompare(b.name),
