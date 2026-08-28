@@ -304,7 +304,7 @@
   // as attributes, which are not what the observer watches.
   function syncTabs(panel) {
     const tabs = panel.querySelector(".tbp-tabs");
-    const signature = pages.map((p) => `${p.id}:${p.label}`).join(" ");
+    const signature = pages.map((p) => `${p.id}:${p.label}`).join("\0");
     if (tabs.dataset.signature !== signature) {
       tabs.dataset.signature = signature;
       tabs.textContent = "";

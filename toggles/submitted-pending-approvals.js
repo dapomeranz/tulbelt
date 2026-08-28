@@ -73,7 +73,16 @@
   }
 
   async function apiJson(url, auth) {
-    const resp = await fetch(url, { credentials: "include", headers: apiHeaders(auth) });
+    const send = (headers) => fetch(url, { credentials: "include", headers });
+    let resp = await send(apiHeaders(auth));
+    // The sniffed Authorization header can be stale or scoped to a narrower
+    // credential than the apps API accepts (it answers 403 AuthenticationFailed).
+    // The session cookie is same-origin and usually carries auth on its own, so
+    // a rejected header is worth one retry without it rather than a dead end.
+    if (resp.status === 401 || resp.status === 403) {
+      const { Authorization: _drop, ...cookieOnly } = apiHeaders(auth);
+      resp = await send(cookieOnly);
+    }
     if (!resp.ok) {
       const body = await resp.text().catch(() => "");
       throw new Error(`API error ${resp.status}${body ? `: ${body.slice(0, 120)}` : ""}`);
