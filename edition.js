@@ -3,6 +3,10 @@
 // only file the Plus build overwrites, so pulling free changes into Plus never
 // conflicts — new free behavior goes elsewhere, and only reads from here.
 
+// Optional popup fields, all unset here so the free popup keeps its plain look:
+//   badge        pill shown after the name in the popup header
+//   tagline      replaces the "tulip.co tweaks" subtitle
+//   extrasLabel  heading over the EXTRA_FEATURES, which the popup lists first
 export const EDITION = {
   id: "free",
   name: "Tulbelt",

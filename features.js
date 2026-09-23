@@ -237,13 +237,22 @@ const CORE_FEATURES = [
 // of the core features never shift.
 export const FEATURES = [...CORE_FEATURES, ...EXTRA_FEATURES];
 
-// The popup list: the opt-in toggles first, then the ones that ship on, each run
-// alphabetical. The popup draws its section label at the boundary between them.
+const EXTRA_FEATURE_IDS = new Set(EXTRA_FEATURES.map((feature) => feature.id));
+
+/** True for a feature the edition added on top of the core list. */
+export function isExtraFeature(feature) {
+  return EXTRA_FEATURE_IDS.has(feature.id);
+}
+
+// The popup list: the edition's extra toggles first (none in the free build),
+// then the opt-in toggles, then the ones that ship on, each run alphabetical.
+// The popup draws a section label wherever one run gives way to the next.
 // Set `developerOnly: true` to hide a feature until developer mode (five clicks
 // on the popup title). Reload the extension after editing this file.
 export function getPopupFeatures({ showDeveloperFeatures = false } = {}) {
   return FEATURES.filter((feature) => feature.developerOnly !== true || showDeveloperFeatures).sort(
     (a, b) =>
+      Number(isExtraFeature(b)) - Number(isExtraFeature(a)) ||
       Number(a.defaultEnabled === true) - Number(b.defaultEnabled === true) ||
       a.name.localeCompare(b.name),
   );
