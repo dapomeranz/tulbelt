@@ -2,6 +2,8 @@
 // declarativeNetRequest dynamic rule when its toggle is on. Add a new entry
 // to ship a new toggle — the popup and background sync read from here.
 
+import { EXTRA_FEATURES } from "./edition.js";
+
 // Old toggles merged into `compact-app-editor-header`. Kept here so getToggles
 // can migrate existing users once.
 export const LEGACY_COMPACT_APP_EDITOR_HEADER_IDS = [
@@ -9,7 +11,7 @@ export const LEGACY_COMPACT_APP_EDITOR_HEADER_IDS = [
   "hide-subheader-workspace-label",
 ];
 
-export const FEATURES = [
+const CORE_FEATURES = [
   {
     id: "table-default-sort",
     name: "Sort Tables New to Old",
@@ -230,6 +232,10 @@ export const FEATURES = [
     developerOnly: true,
   },
 ];
+
+// Edition-specific features (Tulbelt Plus) go last so the index-based rule IDs
+// of the core features never shift.
+export const FEATURES = [...CORE_FEATURES, ...EXTRA_FEATURES];
 
 // The popup list: the opt-in toggles first, then the ones that ship on, each run
 // alphabetical. The popup draws its section label at the boundary between them.

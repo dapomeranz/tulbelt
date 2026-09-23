@@ -7,6 +7,7 @@ import {
   setToggle,
   setToggles,
 } from "./features.js";
+import { EDITION } from "./edition.js";
 
 const DEV_MODE_CLICKS = 5;
 const DEV_MODE_CLICK_WINDOW_MS = 2000;
@@ -223,6 +224,8 @@ function setDeveloperModeSubtitle(enabled) {
 }
 
 async function render() {
+  document.querySelector(".header-brand h1").textContent = EDITION.name;
+
   const developerMode = await getDeveloperMode();
   const toggles = await getToggles();
   const list = document.getElementById("toggles");
