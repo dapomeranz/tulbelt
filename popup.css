@@ -115,6 +115,22 @@ header h1 {
   letter-spacing: -0.01em;
 }
 
+/* Edition pill after the name (Plus build only; the free edition sets no badge) */
+.edition-badge {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--accent);
+  color: #fff;
+  font-size: 9.5px;
+  font-weight: 700;
+  line-height: 1.5;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  vertical-align: 1px;
+}
+
 header .subtitle {
   margin: 1px 0 0;
   font-size: 10px;
@@ -221,6 +237,33 @@ ul#toggles {
   text-transform: uppercase;
   letter-spacing: 0.06em;
   color: var(--muted);
+}
+
+/* A label heading the list has nothing above it to divide from. */
+.section-label:first-child {
+  margin-top: 3px;
+  padding-top: 3px;
+  border-top: 0;
+}
+
+/* The edition's extras run: accent heading and a faint accent wash on the rows,
+   so they read as their own group rather than part of the core list. */
+.section-label.section-extra {
+  color: var(--accent);
+}
+
+.section-label.section-extra::before {
+  content: "\2726\00a0";
+}
+
+.feature-extra label {
+  background: color-mix(in srgb, var(--accent) 6%, transparent);
+  margin-bottom: 2px;
+}
+
+.feature-extra label:hover,
+.feature-extra label:focus-within {
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
 }
 
 .no-results {

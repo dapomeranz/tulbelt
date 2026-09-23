@@ -2,14 +2,17 @@ import {
   getDeveloperMode,
   getPopupFeatures,
   getToggles,
+  isExtraFeature,
   restoreDefaults,
   setDeveloperMode,
   setToggle,
   setToggles,
 } from "./features.js";
+import { EDITION } from "./edition.js";
 
 const DEV_MODE_CLICKS = 5;
 const DEV_MODE_CLICK_WINDOW_MS = 2000;
+const DEFAULT_TAGLINE = "tulip.co tweaks";
 
 const featureTemplate = document.createElement("template");
 featureTemplate.innerHTML = `
@@ -35,7 +38,7 @@ featureTemplate.innerHTML = `
 `;
 
 const sectionTemplate = document.createElement("template");
-sectionTemplate.innerHTML = `<li class="section-label">On by default</li>`;
+sectionTemplate.innerHTML = `<li class="section-label"></li>`;
 
 const tooltip = document.getElementById("tooltip");
 const SHOW_DELAY_MS = 150;
@@ -109,6 +112,7 @@ function createFeatureNode(feature, enabled) {
   node.querySelector(".feature-name").textContent = feature.name;
   node.dataset.featureId = feature.id;
   node.dataset.search = `${feature.name} ${feature.description}`.toLowerCase();
+  node.classList.toggle("feature-extra", isExtraFeature(feature));
   const cb = node.querySelector("input");
   bindInfoIcon(node.querySelector(".feature-info"), cb, feature.description);
   cb.checked = enabled;
@@ -116,15 +120,38 @@ function createFeatureNode(feature, enabled) {
   return node;
 }
 
-// getPopupFeatures hands back the opt-in run first, so the boundary is the first
-// default-on feature. Only that line gets a label: it reads as "everything below
-// ships on", which leaves the run above it needing no heading of its own.
+// Which run of getPopupFeatures a feature belongs to. The list arrives grouped
+// in this order: edition extras, opt-in, then default-on.
+function sectionOf(feature) {
+  if (isExtraFeature(feature)) return "extra";
+  return feature.defaultEnabled === true ? "on" : "off";
+}
+
+function createSectionLabel(section) {
+  const node = sectionTemplate.content.firstElementChild.cloneNode(true);
+  node.classList.add(`section-${section}`);
+  node.textContent = {
+    extra: EDITION.extrasLabel ?? `${EDITION.name} extras`,
+    off: "Off by default",
+    on: "On by default",
+  }[section];
+  return node;
+}
+
+// A label goes wherever one run gives way to the next. The opt-in run gets none
+// when it leads the list: the "On by default" line below it reads as
+// "everything below ships on", so the rows above need no heading of their own.
+// Extras always get one, so they don't read as part of the core list.
 function buildPopupFeatures(toggles, showDeveloperFeatures) {
-  const features = getPopupFeatures({ showDeveloperFeatures });
-  const nodes = features.map((feature) => createFeatureNode(feature, toggles[feature.id]));
-  const boundary = features.findIndex((feature) => feature.defaultEnabled === true);
-  if (boundary > -1) {
-    nodes.splice(boundary, 0, sectionTemplate.content.firstElementChild.cloneNode(true));
+  const nodes = [];
+  let previous = null;
+  for (const feature of getPopupFeatures({ showDeveloperFeatures })) {
+    const section = sectionOf(feature);
+    if (section !== previous && (previous !== null || section !== "off")) {
+      nodes.push(createSectionLabel(section));
+    }
+    previous = section;
+    nodes.push(createFeatureNode(feature, toggles[feature.id]));
   }
   return nodes;
 }
@@ -219,10 +246,23 @@ function bindDeveloperModeUnlock(onChange) {
 function setDeveloperModeSubtitle(enabled) {
   const subtitle = document.querySelector(".subtitle");
   if (!subtitle) return;
-  subtitle.textContent = enabled ? "tulip.co tweaks · developer" : "tulip.co tweaks";
+  const tagline = EDITION.tagline ?? DEFAULT_TAGLINE;
+  subtitle.textContent = enabled ? `${tagline} · developer` : tagline;
+}
+
+function renderEditionName() {
+  const title = document.querySelector(".header-brand h1");
+  title.textContent = EDITION.name;
+  if (!EDITION.badge) return;
+  const badge = document.createElement("span");
+  badge.className = "edition-badge";
+  badge.textContent = EDITION.badge;
+  title.append(badge);
 }
 
 async function render() {
+  renderEditionName();
+
   const developerMode = await getDeveloperMode();
   const toggles = await getToggles();
   const list = document.getElementById("toggles");
