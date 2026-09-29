@@ -287,6 +287,8 @@ async function render() {
 
   document.addEventListener("scroll", hideTooltip, true);
 
+  if (EDITION.supportUrl) document.getElementById("feedback-link").href = EDITION.supportUrl;
+
   for (const link of document.querySelectorAll(".header-links a")) {
     bindHoverTooltip(link, link.getAttribute("aria-label"));
     link.addEventListener("click", (e) => {
