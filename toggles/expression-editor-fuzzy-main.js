@@ -1904,14 +1904,34 @@
     return scope.querySelector(SAVE_BTN_SEL);
   }
 
+  // What each hinted Save button said before, to put back on disable.
+  const saveHintOriginals = new WeakMap();
+
   function ensureSaveButtonHint(editor) {
     const btn = findSaveButton(editor);
     if (!btn || btn.hasAttribute(SAVE_HINT_ATTR)) return;
+    saveHintOriginals.set(btn, {
+      ariaLabel: btn.getAttribute("aria-label"),
+      title: btn.getAttribute("title"),
+    });
     const base = (btn.getAttribute("aria-label") || btn.textContent || "Save").trim();
     const hint = `${base} (Ctrl+Enter)`;
     btn.setAttribute("aria-label", hint);
     btn.setAttribute("title", hint);
     btn.setAttribute(SAVE_HINT_ATTR, "true");
+  }
+
+  function clearSaveButtonHints() {
+    const restore = (btn, attr, value) => {
+      if (value === null || value === undefined) btn.removeAttribute(attr);
+      else btn.setAttribute(attr, value);
+    };
+    for (const btn of document.querySelectorAll(`[${SAVE_HINT_ATTR}]`)) {
+      const original = saveHintOriginals.get(btn);
+      restore(btn, "aria-label", original?.ariaLabel);
+      restore(btn, "title", original?.title);
+      btn.removeAttribute(SAVE_HINT_ATTR);
+    }
   }
 
   function isSaveShortcut(e) {
@@ -2682,6 +2702,7 @@
     } else {
       log("disabling");
       detachAll();
+      clearSaveButtonHints();
       removeStyles();
       // Keep the doc observer running if the user is still observing.
       if (!observing) stopObserver();

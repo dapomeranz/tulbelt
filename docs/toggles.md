@@ -43,8 +43,7 @@ to the right edge of each row toggles its collapsed state; when collapsed, the
 row's Query / Record Placeholder buttons, aggregations, and linked record
 placeholders are hidden, leaving just the icon, table name, and a two-line
 "· N placeholders" / "· M aggregations" summary visible (lines with a zero
-count are omitted). A "Collapse all" / "Expand all" toggle below the Add
-Table row collapses or expands every table at once. The summary is hidden when
+count are omitted). The summary is hidden when
 expanded, and the table-name button keeps its original menu-open click. Each
 table starts collapsed; state lives in DOM attributes only, so a fresh
 navigation collapses everything again.

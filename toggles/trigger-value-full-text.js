@@ -1,5 +1,5 @@
 // Trigger-editor Value Picker inputs (`input[aria-label="Value Picker"]`) are
-// a fixed ~175px line, so long static values get clipped and the only way to
+// a fixed ~218px line, so long static values get clipped and the only way to
 // read one is to click in and arrow through.
 //
 // Two read-side fixes, neither of which touches the value:
@@ -33,7 +33,7 @@
   // Tulip's stock width for these inputs, used as a floor: the toggle should
   // only ever add width, never take it away, so a value that already fits
   // renders exactly as it does with the toggle off.
-  const STOCK_WIDTH = "175px";
+  const STOCK_WIDTH = "218px";
 
   // Scoped to the trigger editor by Tulip's CSS-module class prefix, so
   // look-alike inputs elsewhere in the app are left alone.
@@ -54,6 +54,14 @@
          the input can only ever grow to the wrapper's edge. */
       ${SCOPE} :has(> ${INPUT}) {
         width: auto !important;
+        max-width: 100% !important;
+      }
+      /* Everything between the input and the editor is sized by its content, so it
+         grows with the input and the max-widths above cap nothing, in action and
+         condition rows alike. Holding each level to its parent stops the input at
+         the row. */
+      [data-testid="event-editor"] :has(${INPUT}) {
+        min-width: 0 !important;
         max-width: 100% !important;
       }
     `;

@@ -2,7 +2,7 @@
 // app and, every ACTIVE_THRESHOLD_MS of active time, drive the native snapshot flow:
 // click the snapshot button, fill the description, click Create snapshot.
 //
-// "Active" means: tab visible, URL still on /apps/<id>/versions/..., and an
+// "Active" means: tab visible, URL still on [/w/<ws>]/apps/<id>/versions/..., and an
 // input event seen in the last IDLE_AFTER_MS. Time is bucketed per app id so
 // switching apps doesn't bleed counters together.
 
@@ -10,7 +10,7 @@
   const FEATURE_ID = "auto-snapshot";
   const TOGGLES_KEY = "toggles";
   const STATE_KEY = "autoSnapshotState";
-  const URL_PATTERN = /^https?:\/\/([^.]+)\.tulip\.co\/apps\/([^/]+)\/versions(\/|$)/;
+  const URL_PATTERN = /^https?:\/\/([^.]+)\.tulip\.co(?:\/w\/[^/]+)?\/apps\/([^/]+)\/versions(\/|$)/;
   const ACTIVE_THRESHOLD_MS = 15 * 60 * 1000;
   const IDLE_AFTER_MS = 60 * 1000;
   const TICK_MS = 1000;
