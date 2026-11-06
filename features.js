@@ -143,7 +143,7 @@ const CORE_FEATURES = [
     id: "collapse-tables-tile",
     name: "Collapse Record Placeholders",
     description:
-      'On app editor pages, click the caret at the right edge of a table row in the Tables tile to collapse/expand its Query, Record Placeholder, and linked record buttons. Each table starts collapsed — only the icon, table name, and a two-line "· N placeholders" / "· M aggregations" summary show until you expand it. The table name still opens its menu on click. A "Collapse all" / "Expand all" toggle below the Add Table row collapses or expands every table at once.',
+      'On app editor pages, click the caret at the right edge of a table row in the Tables tile to collapse/expand its Query, Record Placeholder, and linked record buttons. Each table starts collapsed — only the icon, table name, and a two-line "· N placeholders" / "· M aggregations" summary show until you expand it. The table name still opens its menu on click.',
     defaultEnabled: true,
   },
   {
