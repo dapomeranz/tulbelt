@@ -26,6 +26,13 @@
   const TRIGGER_BTN_SELECTOR = `button[aria-label="${TRIGGER_BTN_LABEL}"]`;
   const COPY_LINK_BTN_SELECTOR = 'button[aria-label="Copy link to trigger"]';
   const SCROLL_CONTAINER_SELECTOR = '[style*="overflow: auto"][style*="will-change: transform"]';
+  // What a button with no variable chosen reads.
+  const UNSET_LABEL = "Select an option";
+  // A trigger's variable buttons can render well after its editor, and the pass
+  // that reads them runs once per open, so it waits for them. A trigger with no
+  // variables just waits out the limit.
+  const EXPAND_WAIT_MS = 3000;
+  const EXPAND_POLL_MS = 100;
 
   let enabled = false;
   let attached = false;
@@ -297,13 +304,28 @@
     if (path) patchButton(btn, path);
   }
 
+  function expandCandidates() {
+    return [...document.querySelectorAll(TRIGGER_BTN_SELECTOR)].filter((b) => {
+      const leaf = getButtonLeafText(b);
+      return leaf && leaf !== UNSET_LABEL && !isPatched(b);
+    });
+  }
+
+  async function waitForExpandCandidates() {
+    const deadline = Date.now() + EXPAND_WAIT_MS;
+    let found = expandCandidates();
+    while (!found.length && enabled && Date.now() < deadline) {
+      await sleep(EXPAND_POLL_MS);
+      found = expandCandidates();
+    }
+    return found;
+  }
+
   async function runExpand() {
     if (expanding) return;
     expanding = true;
     try {
-      const candidates = [...document.querySelectorAll(TRIGGER_BTN_SELECTOR)].filter(
-        (b) => !isPatched(b),
-      );
+      const candidates = await waitForExpandCandidates();
       for (const candidate of candidates) {
         if (!enabled) break;
         try {
