@@ -22,6 +22,8 @@
   const SCROLL_CONTAINER_SELECTOR = '[style*="overflow: auto"][style*="will-change: transform"]';
   const STASH_ATTR = "data-tulbelt-vfp-original";
   const PATCHED_ATTR = "data-tulbelt-vfp-patched";
+  // Which labels this toggle rewrote: variable-full-path shares the two above.
+  const OWN_ATTR = "data-tulbelt-expand-patched";
 
   // The copy-link button's parent wrapper is our anchor for insertion.
 
@@ -153,7 +155,17 @@
       target.setAttribute(STASH_ATTR, target.textContent);
     }
     target.setAttribute(PATCHED_ATTR, path);
+    target.setAttribute(OWN_ATTR, "true");
     target.textContent = path;
+  }
+
+  function restoreLabels() {
+    for (const el of document.querySelectorAll(`[${OWN_ATTR}]`)) {
+      if (el.hasAttribute(STASH_ATTR)) el.textContent = el.getAttribute(STASH_ATTR);
+      el.removeAttribute(STASH_ATTR);
+      el.removeAttribute(PATCHED_ATTR);
+      el.removeAttribute(OWN_ATTR);
+    }
   }
 
   // Get the currently-visible leaf text of a variable trigger button.
@@ -247,6 +259,7 @@
     if (status) status.textContent = `0 / ${total}`;
 
     for (const candidate of candidates) {
+      if (!enabled) break;
       try {
         await processButton(candidate);
       } catch (e) {
@@ -370,6 +383,7 @@
     onDisable() {
       enabled = false;
       stopObserver();
+      restoreLabels();
       removeStyles();
     },
   });
