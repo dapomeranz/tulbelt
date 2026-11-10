@@ -34,6 +34,32 @@ In the app editor, tracks active editing time per app and automatically creates
 a snapshot after each 15 minutes of activity. Stateful — it persists per-app
 activity time across navigation.
 
+### Clipboard history — `clipboard-history` · **default: on**
+
+In the app editor, adds a clipboard button beside the Variables button in the
+top toolbar. It opens a list of the last 25 things copied on tulip.co; clicking
+an entry puts it back on the system clipboard, ready for a normal Ctrl+V.
+
+A browser extension can't read the operating system's clipboard history, so the
+list is built by watching copies as they happen, on any Tulip page: `copy`/`cut`
+events (text selections and fields), the page's own
+`navigator.clipboard.write()`/`writeText()` calls (how Tulip copies a trigger —
+seen by a `world: "MAIN"` half, `toggles/clipboard-history-main.js`, bridged via
+`<html data-tulbelt-clip-history-enabled>`), and Tulbelt's own copies such as
+**Copy ID**. Things copied in other applications or other sites never appear.
+
+Each row leads with an icon saying whether it was copied or cut. For `copy`/`cut`
+events that is the event itself; a `clipboard.write()` call doesn't say, so it
+counts as a cut when it follows a `cut` event or Ctrl/Cmd+X within a second.
+
+Tulip's structured copies ride on the clipboard's `text/html` flavor as a
+`data-tulip-clipboard` span; that is stored and written back verbatim, so a
+re-copied trigger pastes as the original did. The list lives in
+`chrome.storage.local` (shared across Tulip tabs, survives reloads) until
+**Clear** is clicked; switching the toggle off stops recording and removes the
+button but keeps the list. The main-world capture wrapper stays installed and
+inert when the toggle is off.
+
 ### Collapse table rows — `collapse-tables-tile` · **default: off**
 
 On app version editor pages only (`/w/…/apps/…/versions/…` or
@@ -62,12 +88,59 @@ In the app editor canvas widget context menu (Delete / Move To Front / Back),
 adds Copy (Ctrl+C) and Cut (Ctrl+X) rows that synthesize those keyboard
 shortcuts when clicked.
 
+### Copy table or app ID — `copy-id-button` · **default: off**
+
+On table pages (`/table/<id>`) and app pages (`/apps/<id>/…`), adds a **Copy ID**
+button after the title, with the ID on its tooltip. The ID comes from the URL,
+read at click time so it can't go stale across SPA navigation, and it's the same
+ID the API uses, including suffixed table IDs like `…_DEFAULT`. The button isn't
+shown on `/apps/folders`, which is a list rather than an app.
+
 ### Dark mode — `dark-mode` · **default: off**
 
 Applies a dark color scheme to tulip.co via filter-inversion (invert, contrast,
 brightness on the document; restored regions use the exact inverse so previews,
 canvas, images, and video stay hue-faithful). Targeted tweaks for specific
-surfaces are layered on top.
+surfaces are layered on top. It runs at `document_start`, which is why `lib.js`
+loads there too, so the page is dark from its first paint rather than flashing
+light until `document_idle`.
+
+**Restored regions.** App widgets, the player, and media keep their real colors.
+Restoring is not idempotent: an element restored inside a region that was already
+restored comes out inverted again. So `img`, `video`, `iframe`, and `canvas` get
+no filter of their own inside a restored region. This matters most for custom
+widgets, which render in an iframe inside their canvas widget. Restoring also has
+a floor, because the page filter can't output anything darker than
+`rgb(40, 40, 40)`: pure black in a widget shows as that, and pure red as
+`rgb(255, 40, 40)`.
+
+**Meaningful colors.** Inverting flips hue, so a red Delete button turns cyan, a
+yellow warning turns navy, and Tulip's blue accent turns amber. Those elements get
+a `hue-rotate(180deg)` that puts red back on red while leaving them dark. They have
+hashed class names and rarely a test id, so CSS can't select them. They're found by
+computed color instead, marked with `data-tulbelt-dark-hue`: a tinted background, a
+colored border, or strongly colored text or small icons. Tulip's dark navy body text
+falls below the threshold and stays inverted, since correcting it would put a filter
+on nearly every element. Corrections never nest, because two rotations cancel out,
+and anything inside a restored region is skipped. Elements are re-checked when their
+class changes (a live status flips color in place), when a transition ends, and on
+hover and focus, whose colors change no class. A marked element is a stacking context
+and containing block, so anything with more than 60 descendants is left alone in case
+it hosts a popper of its own. Charts (`.recharts-wrapper`) are corrected as a whole,
+because all of their colors are data.
+
+**Shadows and edges.** Outside restored regions, shadows are stripped because they
+would invert into light halos. That leaves floating menus with no edge, so they get
+a 1px outline. Inside restored regions shadows are left alone, since they're restored
+along with everything else and belong to whoever built the app.
+
+**Scrims.** A black dialog backdrop inverts to white and would brighten the page, so
+`modal-overlay`, `underlay`, and Bootstrap's `.modal-backdrop` are recolored to dim it.
+
+The account logo in the header gets a white background, since a dark logo with
+transparency would otherwise vanish against the dark header. The `history-search`
+palette lives in a shadow root that none of this reaches, so its own stylesheet
+handles dark mode through `:host-context(html.tulbelt-dark)`.
 
 ### Data queries — `data-queries` · **default: off**
 
@@ -416,6 +489,19 @@ Modified and middle clicks keep the browser's normal new-tab behavior. The
 section highlight is re-homed onto the flattened link whose path best matches
 the current URL, using the active/inactive looks read off the real anchors.
 
+### Freeze first table column — `freeze-table-column` · **default: off**
+
+On table pages, keeps the first data column in view when you scroll sideways.
+Tulip already pins the ID column, so this pins the next one beside it with
+`position: sticky`, offset by the ID column's width. That column can be resized,
+so a `ResizeObserver` feeds its live width into a CSS variable on the grid.
+
+The same `dynamic-table` component renders the table widget inside apps, whose
+columns are the app author's to lay out. A grid therefore only qualifies on a
+`/table/<id>` page and only when Tulip has pinned its first column itself (an
+inline `position: sticky` on the header). The marker attribute lives on the grid
+element, so it can't outlive that grid and leak onto another page.
+
 ### Frequent actions on top — `action-editor-frequent` · **default: on**
 
 Collapses the trigger action-type dropdown (`select[data-testid$="action-editor"]`)
@@ -527,6 +613,51 @@ Note that Tulip creates the pasted trigger **on paste**, server-side, before the
 trigger editor opens — there is no save to confirm it, so an unwanted paste is a
 real record to delete. Deep dive:
 [paste-trigger-anywhere.md](./paste-trigger-anywhere.md).
+
+### Record history — `record-history` · **default: on**
+
+Adds a **Record History** tab to the Tulbelt page (account dropdown → **Tulbelt**;
+see [the shared page shell](#the-tulbelt-page-shell) below). It replaces the
+throwaway admin app people build around Tulip's Record History widget, and is
+laid out like one: find a record on the left, read its change history on the
+right.
+
+- **Table** lists the tables of the workspace the tab is in; it filters as you
+  type and also takes a pasted table id or URL. There is no workspace picker:
+  to read another workspace's records, switch Tulip to it first.
+- **Records** searches the table: the list under it shows the records whose id
+  or any text column contains what you've typed (the table's latest records
+  when the box is empty), most recently updated first, 50 at a time with **Load
+  more records**. Each row says which column matched. Click a row and its
+  history opens on the right; Enter opens an exact id match or a lone result.
+- Tulip's own table page gains a history icon among its top-right buttons,
+  beside the CSV export. It opens this tab with that table already picked, and
+  Back returns to the table.
+- A deleted record is in no list but still has history: **Look up "…" as an
+  exact record id** under the list asks for it directly.
+- The history is drawn like the widget's: a heading for who acted and through
+  what (an app at a station, the admin interface, the API, an automation, an AI
+  agent), the steps of an app run, and a card per create / update / delete /
+  form / signature with **Old** and **New** values and a timestamp.
+- **Oldest first / Newest first**, **Hide old values**, **Hide process data**
+  and **Signed completions only** are the widget's own options. A long history
+  arrives in slices: **Load more** fetches the next older one, **Load
+  everything** the lot.
+
+**Only on instances that record history.** Tulip keeps a record's audit trail
+only when the plan feature `tableAuditLog` is on — the same switch that decides
+whether the Record History widget is offered in the app editor. The toggle
+checks it the way Tulip does (the instance's plan, plus any override) and
+exposes nothing until the answer is yes: no tab, no table-page button. While it
+can't tell — nobody signed in yet — it stays hidden and asks again. A yes is
+remembered per instance so the tab is there immediately on the next page load.
+
+The widget has no REST endpoint behind it — it calls the Meteor method
+`getHistoryRecord` over the page's own connection — so the tab makes that same
+call through a small MAIN-world script (`toggles/record-history-main.js`). That
+call runs in the workspace the tab is in, which is why the page is limited to
+it. Details in
+[`docs/record-history.md`](./record-history.md).
 
 ### Row actions next to name — `reorder-row-buttons` · **default: on**
 
@@ -658,6 +789,7 @@ window.__tulbeltPage.register({
   unmount() { ... },               // optional; called when the tab closes
 });
 window.__tulbeltPage.unregister("data-queries");
+window.__tulbeltPage.open("data-queries"); // show the page on that tab
 ```
 
 Registration _is_ the enable signal, so the account-menu item appears when the
@@ -668,6 +800,7 @@ you're currently looking at falls back to the first remaining tab (and takes the
 URL with it) rather than leaving an empty panel.
 
 Current pages: [Data queries](#data-queries--data-queries--default-off)
-(`order: 10`) and [Option Sets](#option-sets-builder--option-sets-builder--default-on)
+(`order: 10`), [Record history](#record-history--record-history--default-on)
+(`order: 15`) and [Option Sets](#option-sets-builder--option-sets-builder--default-on)
 (`order: 20`). Data Queries leads, so it is also the tab the page opens on when
 no tab is named in the URL.

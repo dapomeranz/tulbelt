@@ -1,8 +1,8 @@
 // Shared helpers for isolated-world toggle scripts. All scripts in the
-// manifest's default content_scripts array run in the same isolated world, so
-// this file (listed first there) can hand them helpers via window.__tulbeltLib
-// — no ES modules or build step needed. Scripts in the `world: "MAIN"` and
-// `all_frames` arrays run elsewhere and can NOT use it.
+// manifest's default and document_start content_scripts arrays run in the same
+// isolated world, so this file (listed first, at document_start) can hand them
+// helpers via window.__tulbeltLib — no ES modules or build step needed. Scripts
+// in the `world: "MAIN"` and `all_frames` arrays run elsewhere and can NOT use it.
 
 (() => {
   const STORAGE_KEY = "toggles";

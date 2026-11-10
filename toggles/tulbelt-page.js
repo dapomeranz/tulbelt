@@ -16,6 +16,7 @@
 //     unmount() { ... },               // optional; called when the tab closes
 //   });
 //   __tulbeltPage.unregister("data-queries");
+//   __tulbeltPage.open("data-queries");   // show the page on that tab
 //
 // Registration IS the enable signal — a page registers when its toggle turns
 // on and unregisters when it turns off — so the shell has no toggle of its
@@ -410,6 +411,23 @@
     activate();
   }
 
+  // For a link elsewhere in Tulip that leads to one of our tabs (the Record
+  // History button on a table page). Same route in as the menu item — our own
+  // history entry, so Back returns to the page the link was on — but landing
+  // on a named tab rather than the first.
+  function open(id) {
+    const page = pageById(id);
+    if (!page) return false;
+    if (active) {
+      selectTab(id);
+      return true;
+    }
+    lastRealPath = isFakePath() ? lastRealPath : location.pathname;
+    pushFake(page.path);
+    activate();
+    return true;
+  }
+
   // The panel covers the window, so this is the only way out. Popping our own
   // entry is the honest route; a cold load onto the fake URL has none, so
   // leave for wherever Tulip last was (or the app root).
@@ -501,5 +519,5 @@
     removeStyles(STYLE_ID);
   }
 
-  window.__tulbeltPage = { register, unregister, BASE_PATH };
+  window.__tulbeltPage = { register, unregister, open, BASE_PATH };
 })();

@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Tulbelt",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "description": "Quality-of-life toggles for tulip.co.",
   "permissions": ["declarativeNetRequestWithHostAccess", "storage", "webNavigation"],
   "host_permissions": ["*://*.tulip.co/*"],
@@ -23,8 +23,23 @@
         "*://gxp-docs.tulip.co/*",
         "*://engage.tulip.co/*"
       ],
+      "js": ["toggles/lib.js", "toggles/dark-mode.js"],
+      "run_at": "document_start"
+    },
+    {
+      "matches": ["*://*.tulip.co/*"],
+      "exclude_matches": [
+        "*://tulip.co/*",
+        "*://www.tulip.co/*",
+        "*://community.tulip.co/*",
+        "*://support.tulip.co/*",
+        "*://opsmoto.tulip.co/*",
+        "*://university.tulip.co/*",
+        "*://library.tulip.co/*",
+        "*://gxp-docs.tulip.co/*",
+        "*://engage.tulip.co/*"
+      ],
       "js": [
-        "toggles/lib.js",
         "toggles/tulbelt-page.js",
         "toggles/devtools.js",
         "toggles/reorder-row-buttons.js",
@@ -35,7 +50,6 @@
         "toggles/move-variables-to-toolbar.js",
         "toggles/hide-app-editor-chrome.js",
         "toggles/compact-app-editor-header.js",
-        "toggles/dark-mode.js",
         "toggles/strip-tab-title-prefix.js",
         "toggles/filters-builder.js",
         "toggles/variable-full-path.js",
@@ -51,9 +65,13 @@
         "toggles/option-sets-trigger.js",
         "toggles/data-queries-model.js",
         "toggles/data-queries.js",
+        "toggles/record-history.js",
         "toggles/trigger-value-full-text.js",
         "toggles/flatten-top-menu.js",
         "toggles/paste-trigger-anywhere.js",
+        "toggles/copy-id-button.js",
+        "toggles/freeze-table-column.js",
+        "toggles/clipboard-history.js",
         "toggles/dev-probe.js"
       ],
       "run_at": "document_idle"
@@ -88,7 +106,11 @@
         "*://gxp-docs.tulip.co/*",
         "*://engage.tulip.co/*"
       ],
-      "js": ["toggles/expression-editor-fuzzy-main.js", "toggles/filters-builder-main.js"],
+      "js": [
+        "toggles/expression-editor-fuzzy-main.js",
+        "toggles/filters-builder-main.js",
+        "toggles/record-history-main.js"
+      ],
       "run_at": "document_idle",
       "world": "MAIN"
     },
@@ -109,6 +131,7 @@
         "toggles/app-list-date-columns-main.js",
         "toggles/submitted-pending-approvals-main.js",
         "toggles/paste-trigger-anywhere-main.js",
+        "toggles/clipboard-history-main.js",
         "toggles/tulbelt-session-main.js"
       ],
       "run_at": "document_start",
