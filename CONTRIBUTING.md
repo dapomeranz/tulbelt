@@ -52,7 +52,8 @@ changes that add a toolchain or framework will be asked to justify themselves.
    one (e.g. `toggles/hide-legacy.js`) and keep its shape:
    - wrap everything in `(() => { ... })()`
    - pull shared helpers from `window.__tulbeltLib` (defined in
-     `toggles/lib.js`, loaded first in the default content_scripts array):
+     `toggles/lib.js`, loaded first at document_start, ahead of the default
+     content_scripts array):
      `registerToggle` (storage sync + enable/disable lifecycle),
      `addedNodesObserver`, `ensureStyles`/`removeStyles`
    - `registerToggle(FEATURE_ID, { onEnable, onDisable })` — apply on enable,

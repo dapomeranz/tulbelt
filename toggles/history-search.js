@@ -225,6 +225,16 @@
   }
   .meta .sep::before { content: "·"; margin-right: 10px; color: #c7ced6; }
   .empty { padding: 20px 24px; color: #6b7c8f; font-size: 14px; }
+
+  /* Dark mode inverts the whole page, this overlay included, but its own CSS and
+     color scan can't reach inside a shadow root. See toggles/dark-mode.js. */
+  :host-context(html.tulbelt-dark) .backdrop { background: rgba(255, 255, 255, 0.45); }
+  :host-context(html.tulbelt-dark) .panel { box-shadow: none; outline: 1px solid #cacaca; }
+  :host-context(html.tulbelt-dark) li.sel,
+  :host-context(html.tulbelt-dark) li:not(.sel) .name,
+  :host-context(html.tulbelt-dark) .search-field:focus-within .search-icon {
+    filter: hue-rotate(180deg);
+  }
 `;
 
   function relativeTime(ts) {

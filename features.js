@@ -224,12 +224,40 @@ const CORE_FEATURES = [
     defaultEnabled: true,
   },
   {
+    id: "record-history",
+    name: "Record History",
+    description:
+      "On instances that keep record history — the ones where Tulip offers its Record History widget — adds a \"Record History\" tab to the Tulbelt page (account dropdown → Tulbelt), so reading a table record's change history no longer means building an admin app around the Record History widget. On the left, pick a table from the workspace you are in — type to filter, or paste a table id or URL — and search its records: the list shows the records whose id or any text column contains what you type, most recently updated first. Click one and its history opens on the right; a deleted record, which no list can show, can still be looked up by its exact id. The history is drawn the way the widget draws it: who made each change and through what (an app at a station, the admin interface, the API, an automation, an AI agent), each step of an app run, and every create, update, delete, form, and signature with its old and new values. Sort oldest or newest first, hide old values, hide process data, show signed completions only, and load older slices of a long history. Tulip's own table page also gains a history icon among its top-right buttons, which opens the tab with that table already picked. The data comes from the same call the widget itself makes, issued over this tab's own Tulip session, so you see exactly what your account can already see. On an instance without record history this toggle does nothing at all: no tab, no button. Nothing leaves the browser.",
+    defaultEnabled: true,
+  },
+  {
     id: "dev-tools",
     name: "Dev Tools (Agent Debugging)",
     description:
       "Defines window.__tulbelt (isolated world) with logging and DOM-inspection helpers for agent-driven debugging. Run __tulbelt.copy() in the DevTools console (Tulbelt context) to copy a redacted JSON report. See docs/devtools.md.",
     defaultEnabled: false,
     developerOnly: true,
+  },
+  {
+    id: "copy-id-button",
+    name: "Copy Table & App ID Button",
+    description:
+      "On table and app pages, add a Copy ID button beside the title that copies the table or app ID. Hover it to see the ID.",
+    defaultEnabled: false,
+  },
+  {
+    id: "freeze-table-column",
+    name: "Freeze First Table Column",
+    description:
+      "On table pages, keep the first data column in view when you scroll sideways, next to the ID column Tulip already keeps there.",
+    defaultEnabled: false,
+  },
+  {
+    id: "clipboard-history",
+    name: "Clipboard History",
+    description:
+      "In the app editor, add a clipboard button beside Variables in the top toolbar listing the last 25 things you copied in Tulip (text, plus Tulip items such as triggers). Click one to put it back on the clipboard. The list is kept in this browser until you clear it.",
+    defaultEnabled: true,
   },
 ];
 
