@@ -12,6 +12,17 @@
   "content_scripts": [
     {
       "matches": ["*://*.tulip.co/*"],
+      "exclude_matches": [
+        "*://tulip.co/*",
+        "*://www.tulip.co/*",
+        "*://community.tulip.co/*",
+        "*://support.tulip.co/*",
+        "*://opsmoto.tulip.co/*",
+        "*://university.tulip.co/*",
+        "*://library.tulip.co/*",
+        "*://gxp-docs.tulip.co/*",
+        "*://engage.tulip.co/*"
+      ],
       "js": [
         "toggles/lib.js",
         "toggles/tulbelt-page.js",
@@ -49,18 +60,51 @@
     },
     {
       "matches": ["*://*.tulip.co/*"],
+      "exclude_matches": [
+        "*://tulip.co/*",
+        "*://www.tulip.co/*",
+        "*://community.tulip.co/*",
+        "*://support.tulip.co/*",
+        "*://opsmoto.tulip.co/*",
+        "*://university.tulip.co/*",
+        "*://library.tulip.co/*",
+        "*://gxp-docs.tulip.co/*",
+        "*://engage.tulip.co/*"
+      ],
       "js": ["toggles/context-menu-copy-cut.js", "toggles/snap-to-grid.js"],
       "run_at": "document_idle",
       "all_frames": true
     },
     {
       "matches": ["*://*.tulip.co/*"],
+      "exclude_matches": [
+        "*://tulip.co/*",
+        "*://www.tulip.co/*",
+        "*://community.tulip.co/*",
+        "*://support.tulip.co/*",
+        "*://opsmoto.tulip.co/*",
+        "*://university.tulip.co/*",
+        "*://library.tulip.co/*",
+        "*://gxp-docs.tulip.co/*",
+        "*://engage.tulip.co/*"
+      ],
       "js": ["toggles/expression-editor-fuzzy-main.js", "toggles/filters-builder-main.js"],
       "run_at": "document_idle",
       "world": "MAIN"
     },
     {
       "matches": ["*://*.tulip.co/*"],
+      "exclude_matches": [
+        "*://tulip.co/*",
+        "*://www.tulip.co/*",
+        "*://community.tulip.co/*",
+        "*://support.tulip.co/*",
+        "*://opsmoto.tulip.co/*",
+        "*://university.tulip.co/*",
+        "*://library.tulip.co/*",
+        "*://gxp-docs.tulip.co/*",
+        "*://engage.tulip.co/*"
+      ],
       "js": [
         "toggles/app-list-date-columns-main.js",
         "toggles/submitted-pending-approvals-main.js",
