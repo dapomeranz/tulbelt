@@ -1,5 +1,7 @@
 # Local Claude Code settings (machine-specific permission allowlists)
 .claude/settings.local.json
+# Claude Code's git worktrees: full checkouts, never part of the repo
+.claude/worktrees/
 
 # Local notes / scratch (may contain tenant URLs, tokens, or repro steps)
 local/
