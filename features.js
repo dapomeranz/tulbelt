@@ -24,14 +24,14 @@ const CORE_FEATURES = [
         // so it always participates — Chrome DNR's regexSubstitution silently
         // drops the redirect when a backreference targets a non-participating
         // optional group.
-        regexFilter: "^https://([^/]+)\\.tulip\\.co((?:/w/[^/]+)?/table/[^?]+)$",
+        regexFilter: "^https://([^/]+\\.(?:tulip\\.co|dmgmori-tulip\\.com))((?:/w/[^/]+)?/table/[^?]+)$",
         resourceTypes: ["main_frame"],
       },
       action: {
         type: "redirect",
         redirect: {
           regexSubstitution:
-            "https://\\1.tulip.co\\2?sortOptions=%5B%7B%22sortBy%22%3A%22_createdAt%22%2C%22sortDir%22%3A%22desc%22%7D%5D&offset=0",
+            "https://\\1\\2?sortOptions=%5B%7B%22sortBy%22%3A%22_createdAt%22%2C%22sortDir%22%3A%22desc%22%7D%5D&offset=0",
         },
       },
     },

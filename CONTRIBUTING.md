@@ -20,6 +20,11 @@ changes that add a toolchain or framework will be asked to justify themselves.
   URLs (`<tenant>.tulip.co`). Use `*.tulip.co` in code and
   `example.tulip.co` / `your-instance.tulip.co` in prose. Keep local repro
   URLs in gitignored files (see `.gitignore`).
+- **Tulip instances on other domains.** Besides `*.tulip.co`, Tulip
+  instances run on `*.dmgmori-tulip.com`. A domain like that goes in every
+  `matches` and `host_permissions` entry in `manifest.json`, and in the URL
+  patterns that name tulip.co (`background.js`, `features.js`,
+  `toggles/history-search.js`, `toggles/auto-snapshot.js`).
 
 ## Architecture in one minute
 

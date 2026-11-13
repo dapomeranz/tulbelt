@@ -1,7 +1,7 @@
 import { FEATURES, STORAGE_KEY, getToggles, ruleIdFor, seedDefaults } from "./features.js";
 
 const TABLE_FEATURE_ID = "table-default-sort";
-const TABLE_URL_RE = /^https:\/\/([^/]+)\.tulip\.co((?:\/w\/[^/]+)?\/table\/[^?]+)$/;
+const TABLE_URL_RE = /^https:\/\/([^/]+\.(?:tulip\.co|dmgmori-tulip\.com))((?:\/w\/[^/]+)?\/table\/[^?]+)$/;
 const SORT_QUERY =
   "sortOptions=%5B%7B%22sortBy%22%3A%22_createdAt%22%2C%22sortDir%22%3A%22desc%22%7D%5D&offset=0";
 
@@ -34,7 +34,10 @@ async function doSyncRules() {
 }
 
 const TABLE_NAV_FILTER = {
-  url: [{ hostSuffix: ".tulip.co", pathContains: "/table/" }],
+  url: [
+    { hostSuffix: ".tulip.co", pathContains: "/table/" },
+    { hostSuffix: ".dmgmori-tulip.com", pathContains: "/table/" },
+  ],
 };
 
 // A Back/Forward landed on the un-sorted table entry the redirect leaves behind
@@ -71,7 +74,7 @@ async function onSpaNavigation(details) {
   if (!m) return;
   try {
     await chrome.tabs.update(details.tabId, {
-      url: `https://${m[1]}.tulip.co${m[2]}?${SORT_QUERY}`,
+      url: `https://${m[1]}${m[2]}?${SORT_QUERY}`,
     });
   } catch {
     // Tab may have closed or navigated again — ignore.

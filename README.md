@@ -43,9 +43,10 @@ There is no build step. Load the repository directly:
 4. Click **Load unpacked** and select the repository folder.
 5. Pin the **Tulbelt** icon and open the popup on any `*.tulip.co` page.
 
-Tulbelt runs on Tulip instances only. Tulip's own sites on tulip.co (its
-homepage, community, support, university, library and docs sites) aren't
-instances, so it stays off there.
+Tulbelt runs on Tulip instances only: `*.tulip.co`, and `*.dmgmori-tulip.com`
+for DMG MORI's Tulip instances. Tulip's own sites on tulip.co (its homepage,
+community, support, university, library and docs sites) aren't instances, so it
+stays off there.
 
 Toggles take effect immediately — no page reload needed for most of them, and
 every toggle is designed to cleanly revert when switched back off.
