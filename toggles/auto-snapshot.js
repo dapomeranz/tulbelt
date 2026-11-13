@@ -10,7 +10,7 @@
   const FEATURE_ID = "auto-snapshot";
   const TOGGLES_KEY = "toggles";
   const STATE_KEY = "autoSnapshotState";
-  const URL_PATTERN = /^https?:\/\/([^.]+)\.tulip\.co(?:\/w\/[^/]+)?\/apps\/([^/]+)\/versions(\/|$)/;
+  const URL_PATTERN = /^https?:\/\/([^.]+)\.(?:tulip\.co|dmgmori-tulip\.com)(?:\/w\/[^/]+)?\/apps\/([^/]+)\/versions(\/|$)/;
   const ACTIVE_THRESHOLD_MS = 15 * 60 * 1000;
   const IDLE_AFTER_MS = 60 * 1000;
   const TICK_MS = 1000;
