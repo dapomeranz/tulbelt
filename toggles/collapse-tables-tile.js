@@ -9,6 +9,14 @@
 // behavior (open menu) — only the caret toggles. Default state is
 // collapsed; each table is expanded independently.
 //
+// The search box above the list still reaches those hidden labels. While it
+// holds a term, any table whose query, record placeholder, or aggregation
+// label contains that term (case-insensitive) is expanded so the match is
+// visible. A match on the table name alone stays collapsed. Clearing the box
+// restores the collapse state from before the search. A caret click during a
+// search updates that remembered state; collapsing a row that matches the
+// current term keeps it collapsed until the text changes.
+//
 // DOM landmarks (per a "*Standard Routing" example with a query, an
 // aggregation, and two record placeholders):
 //   .ixIsrx.kuWpdI                            table row (flex row)
@@ -64,7 +72,18 @@
   const COUNTS_ATTR = "data-tulbelt-tbl-counts"; // on the table-name div; CSS ::after reads it
   const CARET_ATTR = "data-tulbelt-tbl-caret"; // on the inserted caret element
   const TILE_ATTR = "data-tulbelt-tbl-tile"; // on the rows' shared parent (the Tables tile container)
-  const ATTRS = [ROW_ATTR, CONTENT_ATTR, NAME_ATTR, COUNTS_ATTR, CARET_ATTR, TILE_ATTR];
+  const USER_ATTR = "data-tulbelt-tbl-user"; // "collapsed" | "expanded"; restored when the search box is empty
+  const HOLD_ATTR = "data-tulbelt-tbl-hold"; // term for which the user collapsed a matching row
+  const ATTRS = [
+    ROW_ATTR,
+    CONTENT_ATTR,
+    NAME_ATTR,
+    COUNTS_ATTR,
+    CARET_ATTR,
+    TILE_ATTR,
+    USER_ATTR,
+    HOLD_ATTR,
+  ];
 
   let active = false;
   let observer = null;
@@ -233,7 +252,13 @@
 
         content.setAttribute(CONTENT_ATTR, "true");
         nameBtn.setAttribute(NAME_ATTR, "true");
+        row.setAttribute(USER_ATTR, "collapsed");
         row.setAttribute(ROW_ATTR, "collapsed");
+      } else if (!row.hasAttribute(USER_ATTR)) {
+        row.setAttribute(
+          USER_ATTR,
+          row.getAttribute(ROW_ATTR) === "expanded" ? "expanded" : "collapsed",
+        );
       }
 
       const tile = row.parentElement;
@@ -244,6 +269,7 @@
       ensureCaret(row);
       updateCountsFor(content);
     }
+    syncSearchExpansion();
   }
 
   function restoreAll() {
@@ -265,10 +291,125 @@
     if (!row) return;
     e.preventDefault();
     e.stopPropagation();
-    row.setAttribute(
-      ROW_ATTR,
-      row.getAttribute(ROW_ATTR) === "collapsed" ? "expanded" : "collapsed",
-    );
+    const next = row.getAttribute(ROW_ATTR) === "collapsed" ? "expanded" : "collapsed";
+    row.setAttribute(ROW_ATTR, next);
+    row.setAttribute(USER_ATTR, next);
+    const term = currentSearchTerm();
+    if (!term || next === "expanded") {
+      row.removeAttribute(HOLD_ATTR);
+      return;
+    }
+    const content = row.querySelector(`:scope > [${CONTENT_ATTR}="true"]`);
+    if (content && childMatches(content, term)) {
+      row.setAttribute(HOLD_ATTR, term);
+    } else {
+      row.removeAttribute(HOLD_ATTR);
+    }
+  }
+
+  // The search box sits above the table rows. Styled-component class hashes
+  // are unstable, so walk from the list: an input inside the tile ahead of
+  // the rows, then previous siblings of the tile and a few ancestors. The
+  // first hit is the nearest box. Inputs inside a table row are ignored.
+  function isSearchInput(input) {
+    if (input.type === "search") return true;
+    const hint = `${input.getAttribute("placeholder") || ""} ${input.getAttribute("aria-label") || ""}`;
+    return /search/i.test(hint);
+  }
+
+  function searchInputWithin(root) {
+    if (!(root instanceof Element)) return null;
+    const inputs = root.matches("input") ? [root] : [...root.querySelectorAll("input")];
+    let found = null;
+    for (const input of inputs) {
+      if (input.closest(`[${ROW_ATTR}]`)) continue;
+      if (isSearchInput(input)) found = input;
+    }
+    return found;
+  }
+
+  function findTablesSearchInput(tile) {
+    if (!tile) return null;
+    const firstRow = tile.querySelector(`:scope > [${ROW_ATTR}]`);
+    if (firstRow) {
+      let sib = firstRow.previousElementSibling;
+      while (sib) {
+        const input = searchInputWithin(sib);
+        if (input) return input;
+        sib = sib.previousElementSibling;
+      }
+    }
+    let node = tile;
+    for (let depth = 0; depth < 6 && node; depth++) {
+      let sib = node.previousElementSibling;
+      while (sib) {
+        const input = searchInputWithin(sib);
+        if (input) return input;
+        sib = sib.previousElementSibling;
+      }
+      node = node.parentElement;
+    }
+    return null;
+  }
+
+  function tablesSearchInput() {
+    for (const tile of document.querySelectorAll(`[${TILE_ATTR}="true"]`)) {
+      const input = findTablesSearchInput(tile);
+      if (input) return input;
+    }
+    return null;
+  }
+
+  function currentSearchTerm() {
+    return (tablesSearchInput()?.value || "").trim().toLowerCase();
+  }
+
+  // Item labels only — not the table name, and not the "Query" / "Record
+  // Placeholder" / "Add …" chrome. Those add buttons put aria-haspopup on
+  // the <button> itself, so a div[aria-haspopup] > button selector skips them.
+  function childMatches(content, term) {
+    const nodes = [
+      ...content.querySelectorAll('span[aria-haspopup="menu"]'),
+      ...content.querySelectorAll(
+        `div[aria-haspopup="menu"]:not([${NAME_ATTR}]) > button[title]`,
+      ),
+      ...content.querySelectorAll(
+        `div[aria-haspopup="menu"]:not([${NAME_ATTR}]) > button:not([title]):not([id])`,
+      ),
+    ];
+    for (const node of nodes) {
+      const label = `${node.getAttribute("title") || ""} ${node.textContent || ""}`.toLowerCase();
+      if (label.includes(term)) return true;
+    }
+    return false;
+  }
+
+  function syncSearchExpansion() {
+    const term = currentSearchTerm();
+    for (const row of document.querySelectorAll(`[${ROW_ATTR}]`)) {
+      const user = row.getAttribute(USER_ATTR) === "expanded" ? "expanded" : "collapsed";
+      if (!term) {
+        row.removeAttribute(HOLD_ATTR);
+        row.setAttribute(ROW_ATTR, user);
+        continue;
+      }
+      if (row.getAttribute(HOLD_ATTR) && row.getAttribute(HOLD_ATTR) !== term) {
+        row.removeAttribute(HOLD_ATTR);
+      }
+      const content = row.querySelector(`:scope > [${CONTENT_ATTR}="true"]`);
+      const held = row.getAttribute(HOLD_ATTR) === term;
+      if (content && !held && childMatches(content, term)) {
+        row.setAttribute(ROW_ATTR, "expanded");
+      } else {
+        row.setAttribute(ROW_ATTR, user);
+      }
+    }
+  }
+
+  function onSearchInput(e) {
+    if (!active) return;
+    if (e.target !== tablesSearchInput()) return;
+    syncSearchExpansion();
   }
 
   function scheduleApply() {
@@ -339,6 +480,8 @@
       active = true;
       ensureStyles(STYLE_ID, CSS);
       document.addEventListener("click", onClick, true);
+      document.addEventListener("input", onSearchInput, true);
+      document.addEventListener("search", onSearchInput, true);
       applyAll();
       startObserver();
     },
@@ -346,6 +489,8 @@
       active = false;
       stopObserver();
       document.removeEventListener("click", onClick, true);
+      document.removeEventListener("input", onSearchInput, true);
+      document.removeEventListener("search", onSearchInput, true);
       restoreAll();
       removeStyles(STYLE_ID);
     },

@@ -72,7 +72,10 @@ placeholders are hidden, leaving just the icon, table name, and a two-line
 count are omitted). The summary is hidden when
 expanded, and the table-name button keeps its original menu-open click. Each
 table starts collapsed; state lives in DOM attributes only, so a fresh
-navigation collapses everything again.
+navigation collapses everything again. The search box above the list still
+works: a term that appears in a query, record placeholder, or aggregation
+expands that table so the match is visible, and clearing the box restores
+the collapse state from before the search.
 
 ### Compact app editor header — `compact-app-editor-header` · **default: off**
 
