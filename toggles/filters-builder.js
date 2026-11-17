@@ -262,9 +262,12 @@
     return out;
   }
 
+  // The arg as the builder shows it. A string shows as typed, unless reading it
+  // back (coerceSingleArg) would turn it into something else: the text "1001"
+  // shows quoted, or the next edit of any row would send the number 1001.
   function stringifyArg(arg) {
     if (arg === undefined || arg === null) return "";
-    if (typeof arg === "string") return arg;
+    if (typeof arg === "string" && coerceSingleArg(arg) === arg) return arg;
     try {
       return JSON.stringify(arg);
     } catch {
