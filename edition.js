@@ -9,6 +9,7 @@
 //   extrasLabel  heading over the EXTRA_FEATURES, which the popup lists first
 //   supportUrl   where the popup's feedback icon goes instead of GitHub issues;
 //                relative URLs resolve against the extension's root
+//   optionsUrl   the edition's options page, shown as a gear in the popup header
 export const EDITION = {
   id: "free",
   name: "Tulbelt",

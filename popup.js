@@ -288,6 +288,11 @@ async function render() {
   document.addEventListener("scroll", hideTooltip, true);
 
   if (EDITION.supportUrl) document.getElementById("feedback-link").href = EDITION.supportUrl;
+  if (EDITION.optionsUrl) {
+    const options = document.getElementById("options-link");
+    options.href = EDITION.optionsUrl;
+    options.hidden = false;
+  }
 
   for (const link of document.querySelectorAll(".header-links a")) {
     bindHoverTooltip(link, link.getAttribute("aria-label"));
