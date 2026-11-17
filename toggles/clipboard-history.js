@@ -13,7 +13,7 @@
 //   * the page calling navigator.clipboard.write()/writeText() — how Tulip
 //     copies triggers. Only visible from the page's world; see
 //     clipboard-history-main.js, which forwards those here.
-//   * Tulbelt's own writeText() calls (Copy ID, option-set export). Those run
+//   * Tulbelt's own writeText() calls (e.g. option-set export). Those run
 //     in this isolated world, which has its own Clipboard prototype, so it is
 //     wrapped here while the toggle is on and put back when it goes off.
 //

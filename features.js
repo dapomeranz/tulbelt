@@ -246,13 +246,6 @@ const CORE_FEATURES = [
     developerOnly: true,
   },
   {
-    id: "copy-id-button",
-    name: "Copy Table & App ID Button",
-    description:
-      "On table and app pages, add a Copy ID button beside the title that copies the table or app ID. Hover it to see the ID.",
-    defaultEnabled: false,
-  },
-  {
     id: "freeze-table-column",
     name: "Freeze First Table Column",
     description:

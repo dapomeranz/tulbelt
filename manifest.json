@@ -70,7 +70,6 @@
         "toggles/flatten-top-menu.js",
         "toggles/paste-trigger-anywhere.js",
         "toggles/stack-trigger-action-parameters.js",
-        "toggles/copy-id-button.js",
         "toggles/freeze-table-column.js",
         "toggles/clipboard-history.js",
         "toggles/dev-probe.js"
