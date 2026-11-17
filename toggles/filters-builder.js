@@ -318,10 +318,12 @@
     } catch {
       // fall through to comma-split
     }
+    // Each item coerces like a single arg, so `1, 2` is [1, 2], not ["1", "2"].
     return trimmed
       .split(",")
       .map((s) => s.trim())
-      .filter((s) => s.length > 0);
+      .filter((s) => s.length > 0)
+      .map(coerceSingleArg);
   }
 
   function serializeFilters(filters) {

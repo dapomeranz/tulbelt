@@ -129,22 +129,42 @@
 
     if (op.arity === 0) return { filter: { field, functionType } };
 
+    const family = familyForType(dataType);
+
     if (op.arity === "list") {
-      const arg = parseListArg(value);
-      if (arg.length === 0) return { error: `"${op.label}" needs at least one value.` };
+      const items = parseListArg(value);
+      if (items.length === 0) return { error: `"${op.label}" needs at least one value.` };
+      const arg = [];
+      for (const item of items) {
+        const { value: v, error } = coerceArg(item, family);
+        if (error) return { error };
+        arg.push(v);
+      }
       return { filter: { field, functionType, arg } };
     }
 
     const text = String(value ?? "").trim();
     if (text === "") return { error: `"${op.label}" needs a value.` };
 
-    const family = familyForType(dataType);
+    const { value: arg, error } = coerceArg(text, family);
+    if (error) return { error };
+    return { filter: { field, functionType, arg } };
+  }
+
+  // One typed value -> what the API compares against. Tulip compares by type,
+  // so a number column needs 5, not "5", and a boolean column true, not "true".
+  function coerceArg(text, family) {
     if (family === "number") {
       const n = Number(text);
       if (!Number.isFinite(n)) return { error: `"${text}" isn't a number.` };
-      return { filter: { field, functionType, arg: n } };
+      return { value: n };
     }
-    return { filter: { field, functionType, arg: text } };
+    if (family === "bool") {
+      const t = text.toLowerCase();
+      if (t === "true" || t === "false") return { value: t === "true" };
+      return { error: `"${text}" isn't true or false.` };
+    }
+    return { value: text };
   }
 
   // ── Query shape ─────────────────────────────────────────────────────────────
