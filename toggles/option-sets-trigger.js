@@ -129,11 +129,17 @@
     el.style.borderBottomLeftRadius = cs.borderBottomRightRadius;
   }
 
-  function buildProxy(real) {
-    const proxy = document.createElement("select");
-    proxy.setAttribute(PROXY_ATTR, "1");
-    proxy.className = real.className;
-    proxy.setAttribute("aria-label", real.getAttribute("aria-label") || "Select source of data");
+  // Value + label. Tulip rebuilds a datasource select's options in place — a
+  // machine pick adds that machine's fields — and the select element itself
+  // stays, so a proxy built earlier keeps the old list unless we compare.
+  function optionsSignature(select) {
+    return Array.from(select.options)
+      .map((o) => `${o.value}\u0000${o.textContent.trim()}`)
+      .join("\u0001");
+  }
+
+  function fillProxyOptions(proxy, real) {
+    proxy.replaceChildren();
     let staticOption = null;
     for (const opt of real.options) {
       const copy = document.createElement("option");
@@ -148,6 +154,15 @@
     // Conceptually (and near-alphabetically) it belongs next to Static value.
     if (staticOption) staticOption.before(sentinel);
     else proxy.appendChild(sentinel);
+    proxy._ossSig = optionsSignature(real);
+  }
+
+  function buildProxy(real) {
+    const proxy = document.createElement("select");
+    proxy.setAttribute(PROXY_ATTR, "1");
+    proxy.className = real.className;
+    proxy.setAttribute("aria-label", real.getAttribute("aria-label") || "Select source of data");
+    fillProxyOptions(proxy, real);
     restoreLeftEdge(proxy, getComputedStyle(real));
     proxy.value = real.value;
     proxy._ossReal = real;
@@ -387,8 +402,17 @@
       // className carries Tulip's valid/invalid styling, which React swaps in
       // place on the (hidden) real select — without mirroring it the proxy
       // keeps whatever state it was born with, e.g. the empty-row red border.
+      // A mid-flow row is left alone: rebuilding would drop the Option Set
+      // sentinel and the set/option pickers. The stale signature makes the
+      // next scan, after the flow ends, pick up the new list.
       if (existing.className !== real.className) existing.className = real.className;
-      if (!flows.has(real) && existing.value !== real.value) existing.value = real.value;
+      if (flows.has(real)) continue;
+      if (existing._ossSig !== optionsSignature(real)) {
+        fillProxyOptions(existing, real);
+        existing.value = real.value;
+      } else if (existing.value !== real.value) {
+        existing.value = real.value;
+      }
     }
   }
 
