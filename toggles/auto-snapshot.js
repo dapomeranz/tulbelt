@@ -4,7 +4,13 @@
 //
 // "Active" means: tab visible, URL still on [/w/<ws>]/apps/<id>/versions/..., and an
 // input event seen in the last IDLE_AFTER_MS. Time is bucketed per app id so
-// switching apps doesn't bleed counters together.
+// switching apps doesn't bleed counters together. The count lives in storage
+// and each tab adds its own active time to it, so tabs open on one app share
+// one count and take one snapshot between them.
+//
+// Every start() and stop() bumps `run`; anything started under an older run
+// (a start still loading state, a snapshot still waiting on its modal) sees
+// that and stops, so a snapshot never completes after the toggle goes off.
 
 (() => {
   const FEATURE_ID = "auto-snapshot";
@@ -15,16 +21,21 @@
   const IDLE_AFTER_MS = 60 * 1000;
   const TICK_MS = 1000;
   const PERSIST_EVERY_MS = 10 * 1000;
+  const RETRY_AFTER_MS = 60 * 1000;
   const ACTIVITY_EVENTS = ["mousemove", "mousedown", "keydown", "wheel", "touchstart", "scroll"];
 
   let enabled = false;
+  let run = 0;
   let currentAppId = null;
   let lastActivityAt = 0;
   let lastPersistAt = 0;
-  let activeMs = {}; // appId -> accumulated active milliseconds
+  let activeMs = {}; // appId -> stored active milliseconds, as last read
+  let pendingMs = 0; // this tab's active time on currentAppId not yet stored
+  let retryAt = 0; // after a failed snapshot, don't try again before this
   let tickHandle = null;
   let urlPollHandle = null;
-  let snapshotInProgress = false;
+  let busy = false;
+  let saving = Promise.resolve();
 
   /** MV3 content scripts usually expose `chrome.storage`; Firefox / some builds use `browser`. */
   function storageLocal() {
@@ -66,20 +77,39 @@
     }
   }
 
-  // Re-read before writing so two tabs on different apps don't clobber each
-  // other's counters. Only this app's slot changes.
-  async function persistAppState(appId) {
-    if (!appId) return;
-    const local = storageLocal();
-    if (!local || !isContextValid()) return;
-    try {
-      const { [STATE_KEY]: stored = {} } = await local.get(STATE_KEY);
-      stored[appId] = activeMs[appId] || 0;
-      await local.set({ [STATE_KEY]: stored });
-    } catch (err) {
-      if (isContextInvalidatedError(err)) stop();
-      else throw err;
-    }
+  // Read-modify-write of the stored counts, one at a time within the tab.
+  // Re-reading first keeps other tabs' counts, and leaves activeMs with what
+  // they've added since.
+  function save(change) {
+    saving = saving
+      .then(async () => {
+        const local = storageLocal();
+        if (!local || !isContextValid()) return;
+        const { [STATE_KEY]: stored = {} } = await local.get(STATE_KEY);
+        change(stored);
+        await local.set({ [STATE_KEY]: stored });
+        activeMs = stored;
+      })
+      .catch((err) => {
+        if (isContextInvalidatedError(err)) stop();
+      });
+    return saving;
+  }
+
+  // Adds this tab's unsaved time to the app's stored count.
+  function flush(appId) {
+    const add = pendingMs;
+    pendingMs = 0;
+    if (!appId) return saving;
+    return save((stored) => {
+      stored[appId] = (stored[appId] || 0) + add;
+    });
+  }
+
+  function resetCount(appId) {
+    return save((stored) => {
+      stored[appId] = 0;
+    });
   }
 
   function markActivity() {
@@ -154,17 +184,29 @@
     el.dispatchEvent(new Event("input", { bubbles: true }));
   }
 
-  async function performSnapshot(appId) {
-    // Defer if another modal is already up — don't fight the user.
-    if (document.querySelector('[data-testid="modal"]')) return false;
-    const snapshotBtn = document.querySelector('[data-testid="app-editor-snapshot"]');
-    if (!snapshotBtn) return false;
+  // The snapshot button, when a snapshot can start now: not while another
+  // modal is up (don't fight the user), and not while the button is disabled.
+  function snapshotButton() {
+    if (document.querySelector('[data-testid="modal"]')) return null;
+    const btn = document.querySelector('[data-testid="app-editor-snapshot"]');
+    if (!btn || btn.disabled || btn.getAttribute("aria-disabled") === "true") return null;
+    return btn;
+  }
+
+  const CANCELLED = new Error("cancelled");
+
+  // true: snapshot taken. false: it failed. null: not taken, and nothing
+  // shown (no button to click, or the toggle went off mid-flow).
+  async function performSnapshot(appId, myRun) {
+    const snapshotBtn = snapshotButton();
+    if (!snapshotBtn) return null;
 
     const overlay = showOverlay("Tulbelt: capturing snapshot…");
     try {
       snapshotBtn.click();
 
       const textarea = await waitForElement('[data-testid="version-description-input"]');
+      if (myRun !== run) throw CANCELLED;
       const minutes = Math.round((activeMs[appId] || 0) / 60000);
       const stamp = new Date().toISOString().replace("T", " ").slice(0, 16);
       setReactValue(
@@ -175,16 +217,22 @@
       const confirmBtn = await waitForElement('[data-testid="publish-confirm"]');
       // Brief pause so React processes the input event and enables submit.
       await new Promise((r) => setTimeout(r, 150));
+      if (myRun !== run) throw CANCELLED;
       confirmBtn.click();
 
       overlay.textContent = "Tulbelt: snapshot created.";
       setTimeout(hideOverlay, 2000);
       return true;
     } catch (err) {
+      // Close the half-open modal: the next attempt starts clean, and a
+      // toggle switched off mid-flow leaves no modal of its own behind.
+      document.querySelector('[data-testid="close-modal-button"]')?.click();
+      if (myRun !== run) {
+        hideOverlay();
+        return null;
+      }
       overlay.textContent = `Tulbelt: snapshot failed (${err.message}).`;
       setTimeout(hideOverlay, 4000);
-      // Close any half-open modal so the next attempt starts clean.
-      document.querySelector('[data-testid="close-modal-button"]')?.click();
       return false;
     }
   }
@@ -194,43 +242,45 @@
       stop();
       return;
     }
-    if (snapshotInProgress) return;
+    if (busy) return;
     if (!currentAppId) return;
     if (!isActive()) return;
 
-    const prev = activeMs[currentAppId] || 0;
-    const next = prev + TICK_MS;
-    activeMs[currentAppId] = next;
-
+    pendingMs += TICK_MS;
+    const appId = currentAppId;
     const now = Date.now();
-    if (now - lastPersistAt >= PERSIST_EVERY_MS) {
-      lastPersistAt = now;
-      await persistAppState(currentAppId);
-    }
+    const due =
+      (activeMs[appId] || 0) + pendingMs >= ACTIVE_THRESHOLD_MS &&
+      now >= retryAt &&
+      snapshotButton() !== null;
+    if (!due && now - lastPersistAt < PERSIST_EVERY_MS) return;
 
-    if (next >= ACTIVE_THRESHOLD_MS) {
-      snapshotInProgress = true;
-      const appAtTrigger = currentAppId;
-      try {
-        const ok = await performSnapshot(appAtTrigger);
-        if (ok) {
-          activeMs[appAtTrigger] = 0;
-          await persistAppState(appAtTrigger);
-        }
-        // On failure, leave the counter alone — the next tick retries once
-        // whatever blocked us (open modal, missing button) clears.
-      } finally {
-        snapshotInProgress = false;
-      }
+    const myRun = run;
+    busy = true;
+    try {
+      lastPersistAt = now;
+      // Saving before a snapshot also reads the count back: if another tab on
+      // this app just took one, the count is back near zero and this tab skips.
+      await flush(appId);
+      if (!due || myRun !== run || appId !== currentAppId) return;
+      if ((activeMs[appId] || 0) < ACTIVE_THRESHOLD_MS) return;
+      const ok = await performSnapshot(appId, myRun);
+      if (ok) await resetCount(appId);
+      // After a failure, wait before trying again; the counter stays, so the
+      // retry still happens once whatever blocked it clears.
+      else if (ok === false) retryAt = Date.now() + RETRY_AFTER_MS;
+    } finally {
+      busy = false;
     }
   }
 
   function checkUrl() {
     const newAppId = getAppId();
     if (newAppId !== currentAppId) {
-      // Persist the outgoing app before switching so its time isn't lost.
-      if (currentAppId) void persistAppState(currentAppId).catch(() => {});
+      // Save the outgoing app's time before switching so it isn't lost.
+      if (currentAppId) void flush(currentAppId);
       currentAppId = newAppId;
+      pendingMs = 0;
       if (currentAppId) markActivity();
     }
   }
@@ -251,7 +301,13 @@
   }
 
   async function start() {
+    const myRun = ++run;
     await loadState();
+    // Switched off (or off and on again) while the state loaded: that later
+    // call owns the timers now.
+    if (myRun !== run) return;
+    pendingMs = 0;
+    retryAt = 0;
     checkUrl();
     markActivity();
     startActivityListeners();
@@ -260,13 +316,14 @@
   }
 
   function stop() {
+    run++;
     if (tickHandle) clearInterval(tickHandle);
     if (urlPollHandle) clearInterval(urlPollHandle);
     tickHandle = null;
     urlPollHandle = null;
     stopActivityListeners();
     hideOverlay();
-    if (currentAppId) void persistAppState(currentAppId).catch(() => {});
+    if (currentAppId) void flush(currentAppId);
     currentAppId = null;
   }
 
