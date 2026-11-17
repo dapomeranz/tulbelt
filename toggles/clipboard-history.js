@@ -24,8 +24,12 @@
 // expects back from a text copy.
 //
 // History lives in chrome.storage.local, so it is shared across Tulip tabs and
-// survives reloads. Switching the toggle off stops recording and removes the
-// button but keeps the stored list; "Clear" in the popover empties it.
+// survives reloads. It is kept per instance (the page's host): a tab lists,
+// and puts back, only what was copied on its own instance, so nothing copied
+// on one customer's instance turns up on another's. The instances share one
+// size budget, and the oldest entries anywhere go first. Switching the toggle
+// off stops recording and removes the button but keeps the stored lists;
+// "Clear" in the popover empties this instance's.
 //
 // The toolbar placement mirrors move-variables-to-toolbar.js (same anchors,
 // same cloned wrapper) and is ordered so the two buttons end up adjacent
@@ -35,7 +39,11 @@
   const { registerToggle, addedNodesObserver, ensureStyles, removeStyles } = window.__tulbeltLib;
 
   const FEATURE_ID = "clipboard-history";
-  const HISTORY_KEY = "clipboardHistory";
+  // { [host]: entries }. The old key held one list for every instance, with no
+  // way to tell whose copy was whose, so it is removed rather than carried over.
+  const HISTORY_KEY = "clipboardHistoryByInstance";
+  const LEGACY_HISTORY_KEY = "clipboardHistory";
+  const INSTANCE = location.host;
   const STYLE_ID = "tulbelt-clip-history-styles";
   const BUTTON_ID = "tulbelt-clip-history-button";
   const POPOVER_ID = "tulbelt-clip-history-popover";
@@ -184,11 +192,39 @@
     );
   }
 
+  function sanitizeAll(stored) {
+    const all = {};
+    if (!stored || typeof stored !== "object" || Array.isArray(stored)) return all;
+    for (const [host, list] of Object.entries(stored)) {
+      const kept = sanitize(list);
+      if (kept.length) all[host] = kept;
+    }
+    return all;
+  }
+
+  // Changes this instance's list, then keeps all of them inside the shared
+  // budget by dropping the oldest entries, whichever instance they're on.
   function mutate(change) {
     writeQueue = writeQueue
       .then(async () => {
         const { [HISTORY_KEY]: stored } = await chrome.storage.local.get(HISTORY_KEY);
-        await chrome.storage.local.set({ [HISTORY_KEY]: change(sanitize(stored)) });
+        const all = sanitizeAll(stored);
+        all[INSTANCE] = change(all[INSTANCE] || []);
+        const newestFirst = Object.values(all)
+          .flat()
+          .sort((a, b) => (b.at || 0) - (a.at || 0));
+        let total = 0;
+        const kept = new Set();
+        for (const entry of newestFirst) {
+          total += entry.text.length + entry.html.length;
+          if (total > MAX_TOTAL_CHARS) break;
+          kept.add(entry);
+        }
+        for (const host of Object.keys(all)) {
+          all[host] = all[host].filter((e) => kept.has(e));
+          if (!all[host].length) delete all[host];
+        }
+        await chrome.storage.local.set({ [HISTORY_KEY]: all });
       })
       // Storage is unreachable once the extension is reloaded under the page.
       .catch(() => {});
@@ -204,25 +240,17 @@
     const op = raw.op === "cut" ? "cut" : "copy";
     mutate((list) => {
       // Copying the same thing again moves it to the top rather than repeating it.
-      const next = [
+      return [
         { at: Date.now(), op, text, html },
         ...list.filter((e) => e.text !== text || e.html !== html),
       ].slice(0, MAX_ENTRIES);
-      let total = 0;
-      const kept = [];
-      for (const entry of next) {
-        total += entry.text.length + entry.html.length;
-        if (total > MAX_TOTAL_CHARS) break;
-        kept.push(entry);
-      }
-      return kept;
     });
   }
 
   async function loadEntries() {
     try {
       const { [HISTORY_KEY]: stored } = await chrome.storage.local.get(HISTORY_KEY);
-      entries = sanitize(stored);
+      entries = sanitizeAll(stored)[INSTANCE] || [];
     } catch (_) {
       entries = [];
     }
@@ -231,7 +259,7 @@
 
   function onStorageChanged(changes, area) {
     if (area !== "local" || !changes[HISTORY_KEY]) return;
-    entries = sanitize(changes[HISTORY_KEY].newValue);
+    entries = sanitizeAll(changes[HISTORY_KEY].newValue)[INSTANCE] || [];
     if (popover) renderPopover();
   }
 
@@ -410,7 +438,7 @@
     if (!entries.length) {
       const empty = document.createElement("div");
       empty.className = "tulbelt-ch-empty";
-      empty.textContent = "Nothing yet. Things you copy in Tulip will show up here.";
+      empty.textContent = "Nothing yet. Things you copy on this instance will show up here.";
       popover.appendChild(empty);
       return;
     }
@@ -556,6 +584,7 @@
       document.documentElement.setAttribute(ENABLED_ATTR, "true");
       ensureStyles(STYLE_ID, CSS);
       chrome.storage.onChanged.addListener(onStorageChanged);
+      chrome.storage.local.remove(LEGACY_HISTORY_KEY).catch(() => {});
       loadEntries();
       window.addEventListener("copy", onCopyOrCut);
       window.addEventListener("cut", onCopyOrCut);
