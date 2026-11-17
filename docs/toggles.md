@@ -330,10 +330,13 @@ endpoint and the fallbacks.
 
 **Auth.** No API key field, and nothing is stored. `toggles/tulbelt-session-main.js`
 runs in the MAIN world at `document_start` and patches `fetch`/`XHR` to capture
-the `Authorization: Basic …` header Tulip's own frontend sends, parking it (with
-the numeric workspace id, which the browser URL doesn't carry — it shows a slug
-like `/w/DEFAULT/`) on `<html>` as `data-tulbelt-auth` / `data-tulbelt-wsid` for
-the isolated world to read. Requests go out same-origin with
+the `Authorization: Basic …` header Tulip's own frontend sends. It keeps the
+header to itself rather than in the DOM, where anything reading the page's HTML
+would get it; the isolated world asks for it with a `tulbelt:session-request`
+event (`sessionAuth` in `toggles/lib.js`), and `tulbelt:session-captured` says
+when there is one to ask for. The numeric workspace id, which the
+browser URL doesn't carry (it shows a slug like `/w/DEFAULT/`), is no secret and
+goes on `<html>` as `data-tulbelt-wsid`. Requests go out same-origin with
 `credentials: "include"` as well, so a rejected header is retried once on cookies
 alone before giving up; if nothing has been captured yet — a cold load straight
 onto the fake URL, or the extension reloaded into an already-open tab — the error
