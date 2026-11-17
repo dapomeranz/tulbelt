@@ -85,6 +85,10 @@ header {
     color 0.12s ease;
 }
 
+.header-links a[hidden] {
+  display: none;
+}
+
 .header-links a:hover {
   background: var(--hover);
   color: var(--fg);
