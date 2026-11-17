@@ -256,7 +256,7 @@ const CORE_FEATURES = [
     id: "clipboard-history",
     name: "Clipboard History",
     description:
-      "In the app editor, add a clipboard button beside Variables in the top toolbar listing the last 25 things you copied in Tulip (text, plus Tulip items such as triggers). Click one to put it back on the clipboard. The list is kept in this browser until you clear it.",
+      "In the app editor, add a clipboard button beside Variables in the top toolbar listing the last 25 things you copied on this Tulip instance (text, plus Tulip items such as triggers). Click one to put it back on the clipboard. Each instance keeps its own list, in this browser, until you clear it.",
     defaultEnabled: true,
   },
 ];
