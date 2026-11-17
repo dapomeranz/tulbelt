@@ -256,12 +256,27 @@
   // Reading the clipboard needs a permission prompt; watching what Tulip hands
   // the clipboard API needs nothing, and it is the same bytes. The async read
   // stays as the fallback for a trigger copied in another tab.
+  //
+  // What was seen is only the clipboard until something else could have
+  // replaced it, and a paste creates the trigger on the spot, so it's
+  // forgotten on any other copy in this tab, and when the user leaves the tab
+  // or the window (they may copy elsewhere). The paste then reads the real
+  // clipboard, as it does for a trigger copied in another tab.
   let lastCopied = null;
+  let copies = 0;
+
+  function forget() {
+    copies++;
+    lastCopied = null;
+  }
 
   const clipProto = window.Clipboard && window.Clipboard.prototype;
   const originalWrite = clipProto && clipProto.write;
+  const originalWriteText = clipProto && clipProto.writeText;
   if (originalWrite) {
     clipProto.write = function (items, ...rest) {
+      forget();
+      const copy = copies;
       try {
         if (enabled()) {
           const item = (items || []).find((i) => i && i.types && i.types.includes("text/html"));
@@ -271,7 +286,8 @@
               .then((blob) => blob.text())
               .then((html) => {
                 const payload = decode(html);
-                if (payload && payload.trigger) lastCopied = payload;
+                // Unless something else was copied while this was read.
+                if (payload && payload.trigger && copy === copies) lastCopied = payload;
               })
               .catch(() => {});
           }
@@ -283,6 +299,25 @@
     // the wrapper, and unwrapping under it is riskier than a no-op. When the
     // toggle is off it captures nothing and changes nothing.
   }
+  if (originalWriteText) {
+    // Same lifetime as the wrapper above; it only forgets.
+    clipProto.writeText = function (...args) {
+      forget();
+      return originalWriteText.apply(this, args);
+    };
+  }
+  document.addEventListener("copy", forget, true);
+  document.addEventListener("cut", forget, true);
+  document.addEventListener("visibilitychange", () => {
+    if (document.hidden) forget();
+  });
+  // The window's own blur, which also fires when focus moves into one of the
+  // page's iframes; only a blur that leaves the page altogether counts.
+  window.addEventListener("blur", () => {
+    setTimeout(() => {
+      if (!document.hasFocus()) forget();
+    });
+  });
 
   async function readClipboardPayload() {
     if (lastCopied) return lastCopied;
@@ -389,13 +424,27 @@
     );
   }
 
+  // A paste creates a trigger, so one click makes one: the second click of a
+  // double click is ignored, and so is any click while a paste is still
+  // reading the clipboard.
+  let pasting = false;
+
   async function onClick(e) {
     if (!enabled()) return;
     const button = e.target && e.target.closest && e.target.closest("[" + BUTTON_ATTR + "]");
     if (!button) return;
     e.preventDefault();
     e.stopPropagation();
+    if (pasting || e.detail > 1) return;
+    pasting = true;
+    try {
+      await paste(button);
+    } finally {
+      pasting = false;
+    }
+  }
 
+  async function paste(button) {
     const destination = resolveDestination(button);
     if (!destination || !destination.type) {
       report(button, false, (destination && destination.error) || "Can't read target");
