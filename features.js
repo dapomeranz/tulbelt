@@ -217,6 +217,13 @@ const CORE_FEATURES = [
     defaultEnabled: true,
   },
   {
+    id: "stack-trigger-action-parameters",
+    name: "Stack Trigger Action Parameters",
+    description:
+      "In the trigger editor, put each action’s arguments on their own line so a long action is easier to read. Within one action, the first field of each parameter lines up; fields after that, and other actions, do not. Thanks to TechplexEngineer (https://github.com/TechplexEngineer) for contributing this toggle.",
+    defaultEnabled: false,
+  },
+  {
     id: "data-queries",
     name: "Data Queries",
     description:

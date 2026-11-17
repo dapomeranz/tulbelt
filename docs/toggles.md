@@ -719,6 +719,21 @@ so Tulip's commit-on-blur handler persists it. A move snaps only X/Y, a resize
 snaps size (and X/Y if the handle moved them); fields the interaction didn't
 change — and values typed directly into the inputs — are left untouched.
 
+### Stack trigger action parameters — `stack-trigger-action-parameters` · **default: off**
+
+In the trigger editor, stacks each action’s arguments on their own lines. Each
+argument unit inside an action (`.action-body`) becomes a full-width flex row,
+which is what pushes the next argument underneath. Within that action, each
+parameter name is padded to the widest name in the action, so the first field
+of every parameter starts on the same vertical line. Fields after the first
+stay immediately beside it, and each action measures its own names, so actions
+do not line up with each other. The action-type dropdown is not a parameter
+name, so it stays full width. The rule stops at the unit: value boxes, the
+controls inside an argument, and the action-type dropdown are left to Wider
+Trigger Value Text, Option Sets, and Frequent Trigger Actions. Switching the
+toggle off removes the stylesheet and the name padding, and the arguments sit
+inline again.
+
 ### Sort tables by newest — `table-default-sort` · **default: on**
 
 On tulip.co table views, redirects to a URL that sorts by `_createdAt`
