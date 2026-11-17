@@ -46,7 +46,7 @@ events (text selections and fields), the page's own
 `navigator.clipboard.write()`/`writeText()` calls (how Tulip copies a trigger —
 seen by a `world: "MAIN"` half, `toggles/clipboard-history-main.js`, bridged via
 `<html data-tulbelt-clip-history-enabled>`), and Tulbelt's own copies such as
-**Copy ID**. Things copied in other applications or other sites never appear.
+an option-set export. Things copied in other applications or other sites never appear.
 
 Each row leads with an icon saying whether it was copied or cut. For `copy`/`cut`
 events that is the event itself; a `clipboard.write()` call doesn't say, so it
@@ -90,14 +90,6 @@ which migrate automatically.)
 In the app editor canvas widget context menu (Delete / Move To Front / Back),
 adds Copy (Ctrl+C) and Cut (Ctrl+X) rows that synthesize those keyboard
 shortcuts when clicked.
-
-### Copy table or app ID — `copy-id-button` · **default: off**
-
-On table pages (`/table/<id>`) and app pages (`/apps/<id>/…`), adds a **Copy ID**
-button after the title, with the ID on its tooltip. The ID comes from the URL,
-read at click time so it can't go stale across SPA navigation, and it's the same
-ID the API uses, including suffixed table IDs like `…_DEFAULT`. The button isn't
-shown on `/apps/folders`, which is a list rather than an app.
 
 ### Dark mode — `dark-mode` · **default: off**
 
