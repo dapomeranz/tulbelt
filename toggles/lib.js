@@ -67,5 +67,21 @@
     document.getElementById(styleId)?.remove();
   }
 
-  window.__tulbeltLib = { registerToggle, addedNodesObserver, ensureStyles, removeStyles };
+  // The Authorization header Tulip's own API calls carry, as captured by
+  // tulbelt-session-main.js, or "" before Tulip has made one. That script
+  // keeps it out of the DOM and answers this request during the dispatch, so
+  // the answer is in by the time dispatchEvent returns. The first answer
+  // counts: that script listens from document_start, before any page script.
+  function sessionAuth() {
+    let auth = "";
+    const onAnswer = (e) => {
+      if (!auth && typeof e.detail === "string") auth = e.detail;
+    };
+    document.addEventListener("tulbelt:session", onAnswer);
+    document.dispatchEvent(new CustomEvent("tulbelt:session-request"));
+    document.removeEventListener("tulbelt:session", onAnswer);
+    return auth;
+  }
+
+  window.__tulbeltLib = { registerToggle, addedNodesObserver, ensureStyles, removeStyles, sessionAuth };
 })();

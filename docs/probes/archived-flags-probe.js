@@ -1,6 +1,6 @@
 // Which flags mark an archived table or column? Paste into the devtools
-// console on any Tulip page (with Tulbelt loaded, so the sniffed session
-// header is on <html>). Prints, for the workspace's table list and the first
+// console on any Tulip page (with Tulbelt loaded, so the session header has
+// been sniffed). Prints, for the workspace's table list and the first
 // table's metadata, every "gone"-looking field each item carries — the shape
 // toggles/data-queries.js's isArchived() guesses at, seen for real.
 //
@@ -9,7 +9,14 @@
 (async () => {
   const html = document.documentElement;
   const ws = html.getAttribute("data-tulbelt-wsid") || "1";
-  const auth = html.getAttribute("data-tulbelt-auth") || "";
+  // Asked of tulbelt-session-main.js, which answers during the dispatch.
+  let auth = "";
+  const onAnswer = (e) => {
+    if (!auth && typeof e.detail === "string") auth = e.detail;
+  };
+  document.addEventListener("tulbelt:session", onAnswer);
+  document.dispatchEvent(new CustomEvent("tulbelt:session-request"));
+  document.removeEventListener("tulbelt:session", onAnswer);
   const headers = { Accept: "application/json" };
   if (auth) headers.Authorization = auth;
   const get = (path) =>

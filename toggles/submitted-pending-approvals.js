@@ -1,12 +1,15 @@
 // Isolated-world half of submitted-pending-approvals.
 //
-// Reads auth/userId/wsId from data- attributes on <html>, written by the
+// Reads userId/wsId from data- attributes on <html>, written by the
 // MAIN-world half (submitted-pending-approvals-main.js). The DOM is shared
 // between both worlds; window.* properties are NOT — hence the attr channel.
 //
-//   document.documentElement.dataset.tulbeltSbaAuth   = "Basic <base64>"
 //   document.documentElement.dataset.tulbeltSbaUid    = userId
 //   document.documentElement.dataset.tulbeltSbaWsid   = wsId
+//
+// The credential is the session one every Tulbelt API call uses
+// (tulbelt-session-main.js), which stays out of the DOM; lib.js's
+// sessionAuth asks for it.
 
 (() => {
   const FEATURE_ID = "submitted-pending-approvals";
@@ -17,12 +20,12 @@
   let enabled = false;
   let pageObserver = null;
 
-  // ── Session state — read from <html> data- attrs set by MAIN world ──────────
+  // ── Session state — ids from <html> data- attrs set by MAIN world ──────────
 
   function getSession() {
     const d = document.documentElement.dataset;
     return {
-      auth: d.tulbeltSbaAuth || null,
+      auth: window.__tulbeltLib.sessionAuth() || null,
       userId: d.tulbeltSbaUid || null,
       wsId: d.tulbeltSbaWsid || null,
     };

@@ -32,7 +32,7 @@
 // walkthrough.
 //
 (() => {
-  const { registerToggle, ensureStyles, removeStyles } = window.__tulbeltLib;
+  const { registerToggle, ensureStyles, removeStyles, sessionAuth } = window.__tulbeltLib;
   const model = window.__tulbeltDataQueriesModel;
 
   const FEATURE_ID = "data-queries";
@@ -114,8 +114,6 @@
   let refreshTableList = null;
 
   // ── Session ─────────────────────────────────────────────────────────────────
-
-  const sessionAuth = () => document.documentElement.getAttribute("data-tulbelt-auth") || "";
 
   // The browser URL carries a workspace *slug* (/w/DEFAULT/...) but the API
   // wants the number (/api/v3/w/1/...), so it has to come off a real request.

@@ -50,7 +50,18 @@
   const SCAN_MAX = 20;
   const SCAN_CONCURRENCY = 6;
 
-  const sessionAuth = () => ROOT.getAttribute("data-tulbelt-auth") || "";
+  // Asked of tulbelt-session-main.js, which answers during the dispatch (see
+  // sessionAuth in toggles/lib.js); the header isn't in the DOM.
+  const sessionAuth = () => {
+    let auth = "";
+    const onAnswer = (e) => {
+      if (!auth && typeof e.detail === "string") auth = e.detail;
+    };
+    document.addEventListener("tulbelt:session", onAnswer);
+    document.dispatchEvent(new CustomEvent("tulbelt:session-request"));
+    document.removeEventListener("tulbelt:session", onAnswer);
+    return auth;
+  };
 
   function workspaceId() {
     const attr = ROOT.getAttribute("data-tulbelt-wsid");
@@ -296,7 +307,7 @@
 
     if (!auth) {
       console.warn(
-        "No data-tulbelt-auth on <html>. Either the data-queries toggle is off,\n" +
+        "No session header captured. Either Tulbelt isn't loaded in this tab,\n" +
           "or the sniffer loaded after Tulip's first API call. Cookies alone may\n" +
           "still be enough — continuing.",
       );

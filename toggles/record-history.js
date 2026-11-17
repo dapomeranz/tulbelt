@@ -34,7 +34,7 @@
 // records, switch Tulip to it first.
 //
 (() => {
-  const { registerToggle, ensureStyles, removeStyles } = window.__tulbeltLib;
+  const { registerToggle, ensureStyles, removeStyles, sessionAuth } = window.__tulbeltLib;
 
   const FEATURE_ID = "record-history";
   const STYLE_ID = "tulbelt-rh-styles";
@@ -82,8 +82,6 @@
   let root = null; // the mounted container, null while the tab is closed
 
   // ── Session (the same borrowed credential Data Queries uses) ────────────────
-
-  const sessionAuth = () => document.documentElement.getAttribute("data-tulbelt-auth") || "";
 
   function ambientWorkspaceId() {
     const attr = document.documentElement.getAttribute("data-tulbelt-wsid");
