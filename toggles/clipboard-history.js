@@ -354,7 +354,9 @@
   }
 
   function describe(entry) {
-    const { kind, preview } = entry.html ? describeTulip(entry) : { kind: "Text", preview: entry.text };
+    const { kind, preview } = entry.html
+      ? describeTulip(entry)
+      : { kind: "Text", preview: entry.text };
     return { kind, preview: preview.slice(0, PREVIEW_CHARS).replace(/\s+/g, " ").trim() };
   }
 

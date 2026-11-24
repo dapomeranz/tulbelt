@@ -1,8 +1,10 @@
 # Contributing to Tulbelt
 
 Thanks for helping out. Tulbelt is deliberately simple: **vanilla JavaScript,
-no dependencies, no build step, no transpile.** Please keep it that way —
-changes that add a toolchain or framework will be asked to justify themselves.
+no runtime dependencies, no build step, no transpile.** The one dev dependency
+is [Biome](https://biomejs.dev), for linting and formatting; the extension
+itself still loads straight from the repo. Please keep it that way — changes
+that add a toolchain or framework will be asked to justify themselves.
 
 ## Ground rules
 
@@ -13,9 +15,10 @@ changes that add a toolchain or framework will be asked to justify themselves.
   page must return to its original state without a reload. Look at any existing
   content script (`toggles/strip-tab-title-prefix.js` is a short example) — they all
   have an explicit restore path. This is a hard requirement, not a nicety.
-- **Match the existing style.** 2-space indent, single quotes, semicolons, and
-  a top-of-file comment explaining _why_ the approach works (not just what it
-  does). Read a couple of existing files first.
+- **Match the existing style.** `npm run format` takes care of indentation,
+  quotes and line wrapping. Beyond that, give each file a top-of-file comment
+  explaining _why_ the approach works (not just what it does). Read a couple of
+  existing files first.
 - **No tenant-specific hostnames in git.** Do not commit real customer instance
   URLs (`<tenant>.tulip.co`). Use `*.tulip.co` in code and
   `example.tulip.co` / `your-instance.tulip.co` in prose. Keep local repro
@@ -109,12 +112,12 @@ You need access to a Tulip instance to test against real pages.
 3. In the popup, toggle your feature **on and then off**, and confirm the page
    fully returns to its original state.
 
-Quick local sanity checks (no dependencies needed):
+Before opening a PR, run the local checks (`npm install` once first):
 
 ```sh
-node --check toggles/my-feature.js
-node -e "JSON.parse(require('fs').readFileSync('manifest.json','utf8'))"
-node --check features.js
+npm run lint     # Biome lint rules
+npm run format   # rewrite files in the house style
+npm run build    # lint + format check, then package dist/tulbelt-<version>.zip
 ```
 
 ## Opening the pull request

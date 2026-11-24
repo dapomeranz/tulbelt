@@ -22,8 +22,10 @@
   const POLL_MS = 700;
   const SETTLE_DEBOUNCE_MS = 250;
 
-  const TABLE_RE = /^https?:\/\/([^.]+)\.(?:tulip\.co|dmgmori-tulip\.com)(?:\/w\/[^/]+)?\/table\/([^/?#]+)/;
-  const APP_RE = /^https?:\/\/([^.]+)\.(?:tulip\.co|dmgmori-tulip\.com)(?:\/w\/[^/]+)?\/apps\/([^/]+)\/versions(\/|$)/;
+  const TABLE_RE =
+    /^https?:\/\/([^.]+)\.(?:tulip\.co|dmgmori-tulip\.com)(?:\/w\/[^/]+)?\/table\/([^/?#]+)/;
+  const APP_RE =
+    /^https?:\/\/([^.]+)\.(?:tulip\.co|dmgmori-tulip\.com)(?:\/w\/[^/]+)?\/apps\/([^/]+)\/versions(\/|$)/;
   const CONNECTOR_RE =
     /^https?:\/\/([^.]+)\.(?:tulip\.co|dmgmori-tulip\.com)(?:\/w\/[^/]+)?\/connector\/[^/]+\/function\/([^/?#]+)/;
 

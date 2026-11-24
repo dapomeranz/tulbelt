@@ -415,7 +415,9 @@
       // Another record was picked while this one loaded; its answer is the
       // one that counts.
       if (state.shown !== target) return;
-      state.history = more ? mergeHistory(result.historyRecord, state.history || []) : result.historyRecord;
+      state.history = more
+        ? mergeHistory(result.historyRecord, state.history || [])
+        : result.historyRecord;
       state.isLimited = result.isLimited;
       state.minDate = result.isLimited ? result.minDate : null;
       state.cursor = result.cursor || "";
@@ -734,11 +736,7 @@
       const hit = cols.find((c) => text(c).toLowerCase().includes(needle));
       if (hit) return `${hit.label || hit.name}: ${text(hit)}`;
     }
-    return cols
-      .map(text)
-      .filter(Boolean)
-      .slice(0, 2)
-      .join(" · ");
+    return cols.map(text).filter(Boolean).slice(0, 2).join(" · ");
   }
 
   const isShown = (recordId) =>
@@ -788,7 +786,11 @@
       box.append(el("p", "rh-muted rh-records-note", rows.length ? "Loading more…" : "Searching…"));
     } else if (!state.recordsError && rows.length === 0) {
       box.append(
-        el("p", "rh-muted rh-records-note", q ? "No record matches." : "This table has no records."),
+        el(
+          "p",
+          "rh-muted rh-records-note",
+          q ? "No record matches." : "This table has no records.",
+        ),
       );
     } else if (state.recordsMore) {
       const more = el("button", "rh-linkbtn rh-records-note", "Load more records");
@@ -800,7 +802,11 @@
     // The way to a record the list can't show. Offered whenever the text
     // isn't already one of the rows.
     if (q && !state.recordsLoading && !rows.some((r) => String(r.id) === q)) {
-      const exact = el("button", "rh-linkbtn rh-records-note", `Look up “${q}” as an exact record id`);
+      const exact = el(
+        "button",
+        "rh-linkbtn rh-records-note",
+        `Look up “${q}” as an exact record id`,
+      );
       exact.type = "button";
       exact.title = "A deleted record is in no list, but its history is still there";
       exact.addEventListener("click", () => fetchHistory({ recordId: q }));
@@ -846,8 +852,10 @@
   };
 
   function eventTitle(event) {
-    if (event.kind === "signature") return sentence("Signed: {form}", { form: strong(event.formName) });
-    if (event.kind === "form") return sentence("Filled form {form}", { form: strong(event.formName) });
+    if (event.kind === "signature")
+      return sentence("Signed: {form}", { form: strong(event.formName) });
+    if (event.kind === "form")
+      return sentence("Filled form {form}", { form: strong(event.formName) });
     return el("span", "rh-sentence", EVENT_TITLES[event.kind] || event.kind || "Event");
   }
 
@@ -875,7 +883,11 @@
   function editGrid(items) {
     const grid = el("div", state.hideOldValues ? "rh-grid rh-grid-2" : "rh-grid");
     if (!state.hideOldValues) {
-      grid.append(el("span", "rh-grid-head"), el("span", "rh-grid-head", "Old"), el("span", "rh-grid-head", "New"));
+      grid.append(
+        el("span", "rh-grid-head"),
+        el("span", "rh-grid-head", "Old"),
+        el("span", "rh-grid-head", "New"),
+      );
     }
     for (const item of items) {
       grid.append(labelNode(item));
@@ -934,7 +946,10 @@
     for (const rec of info.tableRecords || []) {
       const fields = rec.fields || [];
       body.append(
-        sentence("{slot} from {table}", { slot: strong(rec.slotName), table: strong(rec.tableName) }),
+        sentence("{slot} from {table}", {
+          slot: strong(rec.slotName),
+          table: strong(rec.tableName),
+        }),
       );
       if (fields.every((f) => f.value == null)) {
         body.append(el("p", "rh-muted", "No table record loaded"));
@@ -999,11 +1014,14 @@
         return sentence(`Automation {user} updated the ${what}`, { user });
       case "ai-agent": {
         const lead = group.actorType === "automation" ? "Automation" : "User";
-        return sentence(`${lead} {user} updated the ${what} using agent {agent} in conversation {session}`, {
-          user,
-          agent: strong(group.aiContext?.agentName),
-          session: strong(group.aiContext?.aiSessionId),
-        });
+        return sentence(
+          `${lead} {user} updated the ${what} using agent {agent} in conversation {session}`,
+          {
+            user,
+            agent: strong(group.aiContext?.agentName),
+            session: strong(group.aiContext?.aiSessionId),
+          },
+        );
       }
       default:
         return sentence(`{user} updated the ${what} through an unknown context`, { user });
@@ -1065,7 +1083,11 @@
 
     const head = el("div", "rh-head");
     const title = el("h2", "rh-title");
-    title.append(strong(state.shown.tableName || state.shown.tableId), " – ", strong(state.shown.recordId));
+    title.append(
+      strong(state.shown.tableName || state.shown.tableId),
+      " – ",
+      strong(state.shown.recordId),
+    );
     head.append(title);
     if (state.loading) head.append(el("span", "rh-muted", "Loading…"));
     if (!state.history) {

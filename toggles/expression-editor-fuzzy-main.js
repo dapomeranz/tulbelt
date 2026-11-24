@@ -1502,7 +1502,7 @@
       }
       let hook = fib.memoizedState;
       for (let i = 0; hook && i < 60; i++, hook = hook.next) {
-        let v = hook.memoizedState;
+        const v = hook.memoizedState;
         const hit = tryReadSerializedString(v);
         if (hit) return hit;
         if (v && typeof v === "object") {

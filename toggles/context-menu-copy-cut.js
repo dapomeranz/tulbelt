@@ -38,12 +38,6 @@
   function isElement(n) {
     return !!n && typeof n === "object" && n.nodeType === 1;
   }
-  function isDocFragment(n) {
-    return !!n && typeof n === "object" && n.nodeType === 11 && !("host" in n);
-  }
-  function isShadowRoot(n) {
-    return !!n && typeof n === "object" && n.nodeType === 11 && "host" in n;
-  }
   function isUl(n) {
     return isElement(n) && n.tagName === "UL";
   }

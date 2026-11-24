@@ -24,7 +24,8 @@ const CORE_FEATURES = [
         // so it always participates — Chrome DNR's regexSubstitution silently
         // drops the redirect when a backreference targets a non-participating
         // optional group.
-        regexFilter: "^https://([^/]+\\.(?:tulip\\.co|dmgmori-tulip\\.com))((?:/w/[^/]+)?/table/[^?]+)$",
+        regexFilter:
+          "^https://([^/]+\\.(?:tulip\\.co|dmgmori-tulip\\.com))((?:/w/[^/]+)?/table/[^?]+)$",
         resourceTypes: ["main_frame"],
       },
       action: {
@@ -310,7 +311,7 @@ export function ruleIdFor(index) {
 // compact-app-editor-header toggle).
 function resolveDefault(stored, feature) {
   if (feature.id === "compact-app-editor-header") {
-    if (Object.prototype.hasOwnProperty.call(stored, feature.id)) {
+    if (Object.hasOwn(stored, feature.id)) {
       return stored[feature.id];
     }
     const migrated = LEGACY_COMPACT_APP_EDITOR_HEADER_IDS.some((id) => stored[id] === true);
@@ -342,7 +343,7 @@ export async function seedDefaults() {
   const next = { ...stored };
   let changed = false;
   for (const f of FEATURES) {
-    if (Object.prototype.hasOwnProperty.call(next, f.id)) continue;
+    if (Object.hasOwn(next, f.id)) continue;
     // Developer-only features must never be seeded on: content scripts read
     // raw storage, so a true here would activate them for non-developer users
     // even though getToggles() and the popup report them off.

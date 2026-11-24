@@ -370,9 +370,7 @@
   function childMatches(content, term) {
     const nodes = [
       ...content.querySelectorAll('span[aria-haspopup="menu"]'),
-      ...content.querySelectorAll(
-        `div[aria-haspopup="menu"]:not([${NAME_ATTR}]) > button[title]`,
-      ),
+      ...content.querySelectorAll(`div[aria-haspopup="menu"]:not([${NAME_ATTR}]) > button[title]`),
       ...content.querySelectorAll(
         `div[aria-haspopup="menu"]:not([${NAME_ATTR}]) > button:not([title]):not([id])`,
       ),
