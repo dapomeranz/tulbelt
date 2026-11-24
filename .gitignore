@@ -8,8 +8,11 @@ local/
 *.local.md
 scratch.*
 
-# Dependencies (none are committed; only used for ad-hoc tooling via npx)
+# Dev tooling (Biome) — never shipped in the extension
 node_modules/
+
+# npm run build output
+dist/
 
 # OS / editor cruft
 .DS_Store

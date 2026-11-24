@@ -259,7 +259,11 @@
   // Mirrors buildQueryString() + getRecords()'s "omit when empty" rules, so the
   // URL matches what the library would have produced for the same params.
   function queryToParams(query, { offset = 0 } = {}) {
-    const { filters, error } = compileFilters(query.rows, query.columnTypes || {}, query.inputs || {});
+    const { filters, error } = compileFilters(
+      query.rows,
+      query.columnTypes || {},
+      query.inputs || {},
+    );
     if (error) return { error };
 
     const params = {

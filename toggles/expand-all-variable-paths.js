@@ -97,7 +97,7 @@
       ...(scrollContainer.firstElementChild?.querySelectorAll(
         ':scope > div[style*="position: absolute"]',
       ) || []),
-    ].sort((a, b) => parseInt(a.style.top) - parseInt(b.style.top));
+    ].sort((a, b) => parseInt(a.style.top, 10) - parseInt(b.style.top, 10));
 
     // Find the row whose button matches the expected leaf and has aria-selected
     let selectedIdx = -1;

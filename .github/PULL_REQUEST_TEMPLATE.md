@@ -17,8 +17,8 @@
 - [ ] Registered the script in `manifest.json` (if a content script)
 - [ ] The toggle **cleanly reverts** when switched off, with no page reload
 - [ ] Tested by loading unpacked against a real tulip.co page
-- [ ] `node --check` passes on changed `.js` files; `manifest.json` is valid JSON
-- [ ] No new dependencies or build step; matches existing code style
+- [ ] `npm run lint` passes and `npm run format` leaves no changes
+- [ ] No new dependencies or build step
 
 ## Screenshots / clip (for UI changes)
 

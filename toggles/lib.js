@@ -83,5 +83,11 @@
     return auth;
   }
 
-  window.__tulbeltLib = { registerToggle, addedNodesObserver, ensureStyles, removeStyles, sessionAuth };
+  window.__tulbeltLib = {
+    registerToggle,
+    addedNodesObserver,
+    ensureStyles,
+    removeStyles,
+    sessionAuth,
+  };
 })();

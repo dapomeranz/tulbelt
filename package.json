@@ -1,0 +1,17 @@
+{
+  "name": "tulbelt",
+  "private": true,
+  "description": "Quality-of-life toggles for tulip.co.",
+  "license": "MIT",
+  "engines": {
+    "node": ">=22.2"
+  },
+  "scripts": {
+    "lint": "biome lint",
+    "format": "biome format --write",
+    "build": "biome check && node scripts/build.mjs"
+  },
+  "devDependencies": {
+    "@biomejs/biome": "2.6.9"
+  }
+}

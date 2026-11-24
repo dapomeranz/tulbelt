@@ -290,11 +290,11 @@
     const recent = recents
       .filter((r) => !archived.has(r.id))
       .map((r) => ({
-      ...r,
-      name: byId.get(r.id)?.name || r.name,
-      wsId: byId.get(r.id)?.wsId || r.wsId || ambientWsId,
-      recent: true,
-    }));
+        ...r,
+        name: byId.get(r.id)?.name || r.name,
+        wsId: byId.get(r.id)?.wsId || r.wsId || ambientWsId,
+        recent: true,
+      }));
     const seen = new Set(recent.map((r) => r.id));
     const rest = listed
       .filter((t) => !seen.has(t.id))
@@ -510,7 +510,8 @@
     const offset = page * limit;
     const { search } = paramsFor(offset);
 
-    const seq = (runSeq += 1);
+    runSeq += 1;
+    const seq = runSeq;
     state.loading = true;
     state.page = page;
     // A schema reload means a different table — its rows have no business
@@ -659,8 +660,7 @@
     if (!tableId) return;
     // Deselect-all is a legitimate step toward picking a few, but not a file.
     if (Array.isArray(state.query.columns) && state.query.columns.length === 0) {
-      state.error =
-        "No columns selected — every one is unticked. Pick at least one in the editor.";
+      state.error = "No columns selected — every one is unticked. Pick at least one in the editor.";
       render();
       return;
     }
@@ -732,7 +732,7 @@
     const { filters, error } = model.compileFilters(
       state.query.rows,
       state.columnTypes,
-      state.inputs
+      state.inputs,
     );
     if (error) {
       state.error = error;
@@ -1308,7 +1308,11 @@
     state.query.sortOptions.forEach((s, i) => sorts.appendChild(renderSortRow(s, i)));
     if (state.query.sortOptions.length === 0) {
       sorts.appendChild(
-        el("p", "dq-hint", "No default sort — Tulip's own order. Click a column header to sort the grid."),
+        el(
+          "p",
+          "dq-hint",
+          "No default sort — Tulip's own order. Click a column header to sort the grid.",
+        ),
       );
     }
     box.appendChild(sorts);
@@ -1409,9 +1413,7 @@
   function setColumnSelection(names) {
     const all = knownColumnNames();
     const picked = new Set(names);
-    state.query.columns = all.every((n) => picked.has(n))
-      ? null
-      : all.filter((n) => picked.has(n));
+    state.query.columns = all.every((n) => picked.has(n)) ? null : all.filter((n) => picked.has(n));
     // The grid narrows straight away — the rows are the same, only the header
     // changes, so there is nothing to fetch.
     if (state.result) state.result.columns = resultColumns(state.result.rows);
@@ -1876,13 +1878,7 @@
     next.addEventListener("click", () => run({ page: page + 1 }));
     pager.appendChild(next);
 
-    pager.appendChild(
-      el(
-        "span",
-        "dq-note",
-        state.loading ? "Fetching…" : `${limit} per page`,
-      ),
-    );
+    pager.appendChild(el("span", "dq-note", state.loading ? "Fetching…" : `${limit} per page`));
     return pager;
   }
 

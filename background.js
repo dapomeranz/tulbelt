@@ -1,7 +1,8 @@
 import { FEATURES, STORAGE_KEY, getToggles, ruleIdFor, seedDefaults } from "./features.js";
 
 const TABLE_FEATURE_ID = "table-default-sort";
-const TABLE_URL_RE = /^https:\/\/([^/]+\.(?:tulip\.co|dmgmori-tulip\.com))((?:\/w\/[^/]+)?\/table\/[^?]+)$/;
+const TABLE_URL_RE =
+  /^https:\/\/([^/]+\.(?:tulip\.co|dmgmori-tulip\.com))((?:\/w\/[^/]+)?\/table\/[^?]+)$/;
 const SORT_QUERY =
   "sortOptions=%5B%7B%22sortBy%22%3A%22_createdAt%22%2C%22sortDir%22%3A%22desc%22%7D%5D&offset=0";
 
