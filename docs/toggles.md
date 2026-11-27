@@ -120,8 +120,12 @@ on nearly every element. Corrections never nest, because two rotations cancel ou
 and anything inside a restored region is skipped. Elements are re-checked when their
 class changes (a live status flips color in place), when a transition ends, and on
 hover and focus, whose colors change no class. A marked element is a stacking context
-and containing block, so anything with more than 60 descendants is left alone in case
-it hosts a popper of its own. Charts (`.recharts-wrapper`) are corrected as a whole,
+and containing block, so a popup inside it would paint under whatever follows it.
+Anything that contains a popper, menu, listbox, tooltip, or dialog is left alone, as
+is anything with more than 60 descendants in case it hosts an unlabeled one. A menu
+usually opens inside a wrapper that was marked while it was closed (a focus ring is
+enough), so a marked element is re-checked whenever something is added inside it.
+Charts (`.recharts-wrapper`) are corrected as a whole,
 because all of their colors are data.
 
 **Shadows and edges.** Outside restored regions, shadows are stripped because they
@@ -731,13 +735,24 @@ inline again.
 
 ### Sort tables by newest — `table-default-sort` · **default: on**
 
-On tulip.co table views, redirects to a URL that sorts by `_createdAt`
-descending so the most recently created rows are on top. Implemented as a
-`declarativeNetRequest` redirect rule plus a `background.js` bridge that catches
-SPA navigations DNR misses. The bridge ignores Back/Forward navigations
-(`forward_back` transition qualifier) and instead steps back past the un-sorted
-duplicate entry the redirect leaves behind — otherwise re-sorting on Back made
-the browser Back button "go to itself".
+On tulip.co table views, sorts by `_createdAt` descending so the most recently
+created rows are on top. A full load of a table URL with no query is redirected
+to the sorted URL by a `declarativeNetRequest` rule. Opening a table from inside
+Tulip is a `history.pushState` the rule never sees, so
+`toggles/table-default-sort-main.js` (MAIN world, document_start) wraps
+`pushState`/`replaceState`: once Tulip has gone to a bare table URL, it replaces
+that same history entry with the sorted URL and fires `popstate`, and Tulip's
+router reads the address bar again and fetches the records newest first. Nothing
+reloads and no history entry is added, so Back leaves the table as usual;
+Back/Forward never calls `pushState`, so it's never re-sorted. The isolated half,
+`toggles/table-default-sort.js`, passes the switch over as
+`data-tulbelt-table-sort-enabled` on `<html>`.
+
+This replaced a `background.js` bridge that turned each in-app navigation into
+`chrome.tabs.update` onto the sorted URL. That reloaded the whole app on every
+table opened, so Tulip booted again and resumed its session each time, and it
+left an unsorted duplicate entry that made Back "go to itself"; it was also the
+only use of the `webNavigation` permission, which is gone with it.
 
 ### Strip "Tulip | " from tab titles — `strip-tab-title-prefix` · **default: off**
 
