@@ -120,8 +120,12 @@ on nearly every element. Corrections never nest, because two rotations cancel ou
 and anything inside a restored region is skipped. Elements are re-checked when their
 class changes (a live status flips color in place), when a transition ends, and on
 hover and focus, whose colors change no class. A marked element is a stacking context
-and containing block, so anything with more than 60 descendants is left alone in case
-it hosts a popper of its own. Charts (`.recharts-wrapper`) are corrected as a whole,
+and containing block, so a popup inside it would paint under whatever follows it.
+Anything that contains a popper, menu, listbox, tooltip, or dialog is left alone, as
+is anything with more than 60 descendants in case it hosts an unlabeled one. A menu
+usually opens inside a wrapper that was marked while it was closed (a focus ring is
+enough), so a marked element is re-checked whenever something is added inside it.
+Charts (`.recharts-wrapper`) are corrected as a whole,
 because all of their colors are data.
 
 **Shadows and edges.** Outside restored regions, shadows are stripped because they

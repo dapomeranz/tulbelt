@@ -134,8 +134,17 @@
   const MIN_ALPHA = 0.5;
   const MAX_ICON_PX = 48;
   // A filter makes its element a stacking context and containing block, which is
-  // only safe on something small enough not to host a popper of its own.
+  // only safe on something that doesn't host a popup of its own: a popup inside
+  // it would be painted under whatever follows the element, and a fixed one
+  // clipped to it. Size is a guess at that; finding a popup inside is certain.
   const MAX_DESCENDANTS = 60;
+  const POPUPS = [
+    '[data-testid="popper"]',
+    '[role="menu"]',
+    '[role="listbox"]',
+    '[role="tooltip"]',
+    '[role="dialog"]',
+  ].join(", ");
 
   const SCANNED =
     "div, span, button, a, p, li, label, h1, h2, h3, h4, svg, input, textarea, select";
@@ -207,6 +216,7 @@
     return (
       hasMeaningfulColor(el) &&
       el.getElementsByTagName("*").length <= MAX_DESCENDANTS &&
+      !el.querySelector(POPUPS) &&
       !el.closest(SKIP) &&
       !el.parentElement.closest(`[${HUE_ATTR}]`)
     );
@@ -258,9 +268,18 @@
         if (m.target.matches(SCANNED)) pendingElements.add(m.target);
         continue;
       }
+      // A menu usually opens inside a wrapper that was marked while it was
+      // closed, and scanning the added subtree never looks back up at that
+      // wrapper, so it's re-checked here.
+      let added = false;
       for (const node of m.addedNodes) {
-        if (node instanceof Element) pendingSubtrees.add(node);
+        if (node instanceof Element) {
+          pendingSubtrees.add(node);
+          added = true;
+        }
       }
+      const host = added && m.target instanceof Element && m.target.closest(`[${HUE_ATTR}]`);
+      if (host) pendingElements.add(host);
     }
     if (pendingSubtrees.size || pendingElements.size) scheduleFlush();
   }
