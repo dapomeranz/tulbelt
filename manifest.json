@@ -3,7 +3,7 @@
   "name": "Tulbelt",
   "version": "1.3.0",
   "description": "Quality-of-life toggles for tulip.co.",
-  "permissions": ["declarativeNetRequestWithHostAccess", "storage", "webNavigation"],
+  "permissions": ["declarativeNetRequestWithHostAccess", "storage"],
   "host_permissions": ["*://*.tulip.co/*", "*://*.dmgmori-tulip.com/*"],
   "background": {
     "service_worker": "background.js",
@@ -72,6 +72,7 @@
         "toggles/stack-trigger-action-parameters.js",
         "toggles/freeze-table-column.js",
         "toggles/clipboard-history.js",
+        "toggles/table-default-sort.js",
         "toggles/dev-probe.js"
       ],
       "run_at": "document_idle"
@@ -132,7 +133,8 @@
         "toggles/submitted-pending-approvals-main.js",
         "toggles/paste-trigger-anywhere-main.js",
         "toggles/clipboard-history-main.js",
-        "toggles/tulbelt-session-main.js"
+        "toggles/tulbelt-session-main.js",
+        "toggles/table-default-sort-main.js"
       ],
       "run_at": "document_start",
       "world": "MAIN"

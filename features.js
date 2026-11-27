@@ -16,7 +16,7 @@ const CORE_FEATURES = [
     id: "table-default-sort",
     name: "Sort Tables New to Old",
     description:
-      'On the tables page, redirects to a URL that sorts by _createdAt descending. Also fixes the browser Back button, which this redirect otherwise made "go to itself".',
+      "Opens table views sorted by _createdAt descending, newest first, including tables opened from inside Tulip, without reloading the page.",
     defaultEnabled: true,
     rule: {
       condition: {
